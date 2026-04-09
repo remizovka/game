@@ -1,4 +1,4 @@
-import { buildDurakDeck36, shuffleDurakDeck } from "./deck";
+﻿import { buildDurakDeck36, shuffleDurakDeck } from "./deck";
 import {
   allDurakCardsDefended,
   canBeatDurakCard,
@@ -377,6 +377,9 @@ export function applyDurakAction(state: DurakGameState, action: DurakAction): Du
     pair.defense = action.card;
 
     if (allDurakCardsDefended(nextState.table.pairs)) {
+      if (defender.hand.length === 0) {
+        return { ok: true, state: resolveSuccessfulDefense(nextState) };
+      }
       nextState.phase = "throw-in";
       nextState.table.passedThrowers = [];
       nextState.turnPlayerId = firstEligibleThrowerId(nextState);
@@ -424,3 +427,4 @@ export function applyDurakAction(state: DurakGameState, action: DurakAction): Du
   nextState.turnPlayerId = nextState.players[nextState.currentDefenderIndex].id;
   return { ok: true, state: nextState };
 }
+

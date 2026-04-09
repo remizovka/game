@@ -41,6 +41,10 @@ let botTimer: number | null = null;
 let lastLogLine = "";
 const resolvedCardImageSrc = new Map<string, string | null>();
 
+function playerById(playerId: string) {
+  return game.players.find(player => player.id === playerId) ?? null;
+}
+
 function createGame(count: number): DurakGameState {
   const playerIds = Array.from({ length: count }, (_, index) => `P${index}`);
   return createDurakGame({
@@ -52,6 +56,14 @@ function createGame(count: number): DurakGameState {
 function playerLabel(playerId: string): string {
   const idx = Number(playerId.slice(1)) + 1;
   return `Игрок ${idx}`;
+}
+
+function seatLayout(count: number): string[] {
+  if (count <= 1) return ["seat-top"];
+  if (count === 2) return ["seat-left", "seat-right"];
+  if (count === 3) return ["seat-left", "seat-top", "seat-right"];
+  if (count === 4) return ["seat-left", "seat-top-left", "seat-top-right", "seat-right"];
+  return ["seat-left", "seat-top-left", "seat-top", "seat-top-right", "seat-right"];
 }
 
 function currentPlayerId(): string | null {
@@ -67,7 +79,7 @@ function currentDefenderId(): string | null {
 }
 
 function humanPlayer() {
-  return game.players.find(player => player.id === HUMAN_ID) ?? null;
+  return playerById(HUMAN_ID);
 }
 
 function humanTurn(): boolean {
@@ -113,6 +125,16 @@ function unresolvedAttackIndices(): number[] {
     if (!pair.defense) out.push(index);
   });
   return out;
+}
+
+function canPlayerThrowCards(playerId: string): boolean {
+  if (!["throw-in", "take"].includes(game.phase)) return false;
+  const player = playerById(playerId);
+  if (!player?.isActive) return false;
+  if (game.table.pairs.length >= game.table.maxCards) return false;
+  if (game.table.pairs.length >= game.table.defenderCardLimit) return false;
+  const ranks = new Set(tableRanks(game.table.pairs));
+  return player.hand.some(card => ranks.has(durakCardRank(card)));
 }
 
 function suitSymbol(card: DurakCard): string {
@@ -295,42 +317,113 @@ function sanitizeSelection(): void {
   }
 }
 
-function roleBadge(playerId: string): { text: string; tone: "attacker" | "defender" | "out" | null } {
-  const player = game.players.find(item => item.id === playerId);
-  if (!player?.isActive) return { text: "Вне игры", tone: "out" };
-  if (playerId === currentDefenderId()) return { text: "Защита", tone: "defender" };
-  if (playerId === currentAttackerId()) return { text: "Атака", tone: "attacker" };
-  return { text: "", tone: null };
+function roleText(playerId: string): string {
+  const player = playerById(playerId);
+  if (!player?.isActive) return "вне игры";
+  if (playerId === currentDefenderId()) return "защищается";
+  if (playerId === currentAttackerId()) {
+    return game.phase === "throw-in" || game.phase === "take" ? "подкидывает" : "атакует";
+  }
+  return "ждёт";
+}
+
+function playerSpeech(playerId: string): string | null {
+  const player = playerById(playerId);
+  if (!player) return null;
+
+  if (game.finished) {
+    if (playerId === game.loserId) return "Я проиграл";
+    return player.isActive ? "Я выиграл" : "Я вышел";
+  }
+
+  if (!player.isActive) return "Я вышел";
+  if (playerId !== currentPlayerId()) return null;
+
+  if (game.phase === "defense" && playerId === currentDefenderId()) return "Я кроюсь";
+  if (game.phase === "attack") return "Я хожу";
+  if (game.phase === "throw-in" || game.phase === "take") return "Я подкидываю";
+  return null;
+}
+
+function humanPrompt(): string {
+  const human = humanPlayer();
+  if (!human?.isActive) return "Вы уже вышли из партии.";
+
+  if (game.finished) {
+    return game.loserId === HUMAN_ID
+      ? "Партия закончилась. Вы остались с картами."
+      : "Партия закончилась.";
+  }
+
+  if (!humanTurn()) {
+    const turn = currentPlayerId();
+    if (!turn) return "Ожидание следующего хода.";
+    if (game.phase === "defense") return `${playerLabel(turn)} кроется.`;
+    if (game.phase === "attack") return `${playerLabel(turn)} ходит.`;
+    return `${playerLabel(turn)} решает, подкидывать ли ещё.`;
+  }
+
+  if (humanIsDefender() && game.phase === "defense") {
+    if (selectedCards.length === 0) return "Вам крыться.";
+    return resolveDefenseTarget(selectedCards[0]) === null
+      ? "Выберите карту на столе, которую хотите побить."
+      : "Карта подходит. Можно крыть.";
+  }
+
+  if (game.phase === "attack" && game.table.pairs.length === 0) {
+    return "Ходите любой картой.";
+  }
+
+  if (game.phase === "throw-in" || game.phase === "take") {
+    return selectedCards.length > 0
+      ? "Подкидывайте карты того же достоинства, что и карты на столе."
+      : game.phase === "take"
+        ? "Соперник берёт. Докладывать будем?"
+        : "Подкидывайте карты того же достоинства, что и карты на столе.";
+  }
+
+  return selectedCards.length > 0 ? `Выбрано карт: ${selectedCards.length}.` : "Ваш ход.";
 }
 
 function renderOpponents(): void {
   opponentsEl.innerHTML = "";
   const turn = currentPlayerId();
+  const opponents = game.players.filter(player => player.id !== HUMAN_ID);
+  const seats = seatLayout(opponents.length);
 
-  game.players
-    .filter(player => player.id !== HUMAN_ID)
-    .forEach(player => {
+  opponents.forEach((player, index) => {
       const wrap = document.createElement("div");
-      const role = roleBadge(player.id);
-      wrap.className = `opp${turn === player.id ? " active" : ""}${player.id === currentAttackerId() ? " attacker" : ""}${player.id === currentDefenderId() ? " defender" : ""}${!player.isActive ? " out" : ""}`;
+      const seat = seats[index] ?? "seat-top";
+      wrap.className = `opp ${seat}${turn === player.id ? " active" : ""}${player.id === currentAttackerId() ? " attacker" : ""}${player.id === currentDefenderId() ? " defender" : ""}${!player.isActive ? " out" : ""}`;
+
+      const speech = playerSpeech(player.id);
+      if (speech) {
+        const bubble = document.createElement("div");
+        bubble.className = "opp-bubble";
+        bubble.textContent = speech;
+        wrap.append(bubble);
+      }
 
       const head = document.createElement("div");
       head.className = "opp-head";
+      const avatar = document.createElement("div");
+      avatar.className = "opp-avatar";
+      avatar.textContent = String(Number(player.id.slice(1)) + 1);
+      head.append(avatar);
+
+      const titleWrap = document.createElement("div");
       const title = document.createElement("div");
       title.className = "opp-title";
       title.textContent = playerLabel(player.id);
-      head.append(title);
-
-      if (role.tone) {
-        const badge = document.createElement("span");
-        badge.className = `role-badge ${role.tone}`;
-        badge.textContent = role.text;
-        head.append(badge);
-      }
+      const status = document.createElement("div");
+      status.className = "opp-status";
+      status.textContent = player.isActive ? roleText(player.id) : "вне игры";
+      titleWrap.append(title, status);
+      head.append(titleWrap);
 
       const meta = document.createElement("div");
       meta.className = "opp-meta";
-      meta.textContent = player.isActive ? `Карт: ${player.hand.length}` : "Карт нет";
+      meta.textContent = "";
 
       const backs = document.createElement("div");
       backs.className = "opp-backs";
@@ -341,7 +434,7 @@ function renderOpponents(): void {
 
       wrap.append(head, meta, backs);
       opponentsEl.append(wrap);
-    });
+  });
 }
 
 function pairLabel(pair: DurakTablePair): string {
@@ -351,55 +444,75 @@ function pairLabel(pair: DurakTablePair): string {
 function renderCenter(): void {
   const deckCount = game.deck.length;
   trumpInfoEl.innerHTML = "";
-  const trumpLabel = document.createElement("span");
-  trumpLabel.className = "trump-label";
-  trumpLabel.textContent = "Козырь";
+  const cluster = document.createElement("div");
+  cluster.className = "deck-cluster";
+
+  const trumpCluster = document.createElement("div");
+  trumpCluster.className = "stack-cluster trump";
+  const trumpPile = document.createElement("div");
+  trumpPile.className = "stack-pile";
+  if (deckCount > 0) {
+    for (let i = 1; i <= 2; i += 1) {
+      const back = renderBackCard();
+      back.classList.add(`stack-back-${i}`);
+      trumpPile.append(back);
+    }
+  }
   const trumpCardEl = renderFaceCard(game.trumpCard, true);
-  trumpCardEl.classList.add("trump-card-chip");
-  const trumpText = document.createElement("span");
-  trumpText.className = "trump-text";
-  trumpText.textContent = `${rankText(game.trumpCard)}${suitSymbol(game.trumpCard)} · ${suitNameRu(game.trumpSuit)}`;
-  const deckEl = document.createElement("span");
-  deckEl.className = "trump-deck-count";
-  deckEl.textContent = `Колода: ${deckCount}`;
-  trumpInfoEl.append(trumpLabel, trumpCardEl, trumpText, deckEl);
+  if (deckCount > 0) {
+    trumpCardEl.classList.add("stack-trump-card");
+  } else {
+    trumpCardEl.classList.add("stack-single-card");
+  }
+  trumpPile.append(trumpCardEl);
+  trumpCluster.append(trumpPile);
+
+  cluster.append(trumpCluster);
+  if (deckCount > 0) {
+    const deckCluster = document.createElement("div");
+    deckCluster.className = "stack-cluster deck";
+    const deckPile = document.createElement("div");
+    deckPile.className = "stack-pile";
+    const visibleBacks = Math.max(2, Math.min(4, Math.ceil(deckCount / 6)));
+    for (let i = 1; i <= visibleBacks; i += 1) {
+      const back = renderBackCard();
+      back.classList.add(`stack-back-${i}`);
+      deckPile.append(back);
+    }
+    const deckFront = renderBackCard();
+    deckPile.append(deckFront);
+    const deckCountEl = document.createElement("div");
+    deckCountEl.className = "stack-count";
+    deckCountEl.textContent = String(deckCount);
+    deckCluster.append(deckPile, deckCountEl);
+    cluster.append(deckCluster);
+  }
+  trumpInfoEl.append(cluster);
 
   if (game.finished) {
-    winnerBannerEl.textContent = game.loserId
+    winnerBannerEl.innerHTML = "";
+    const title = document.createElement("div");
+    title.className = "winner-title";
+    title.textContent = game.loserId ? "Партия завершена" : "Партия завершилась";
+    const text = document.createElement("div");
+    text.className = "winner-text";
+    text.textContent = game.loserId
       ? `${playerLabel(game.loserId)} остался с картами. Он дурак.`
       : "Партия завершилась без дурака.";
+    const actions = document.createElement("div");
+    actions.className = "winner-actions";
+    const restart = document.createElement("button");
+    restart.type = "button";
+    restart.textContent = "Новая партия";
+    restart.addEventListener("click", () => {
+      startNewGameFromUI();
+    });
+    actions.append(restart);
+    winnerBannerEl.append(title, text, actions);
     winnerBannerEl.classList.add("show");
   } else {
-    winnerBannerEl.textContent = "";
+    winnerBannerEl.innerHTML = "";
     winnerBannerEl.classList.remove("show");
-  }
-
-  if (humanTurn()) {
-    if (game.phase === "defense" && humanIsDefender()) {
-      statusLineEl.textContent =
-        selectedCards.length === 1
-          ? "Выберите карту на столе и нажмите «Побить»."
-          : "Вас бьют: выберите одну карту для защиты.";
-    } else if (game.phase === "take") {
-      statusLineEl.textContent = "Защита сорвана: можно подкидывать или пасовать.";
-    } else if (game.phase === "throw-in") {
-      statusLineEl.textContent = "Можно подкинуть карту подходящего ранга или сказать пас.";
-    } else {
-      statusLineEl.textContent = "Ваш ход: выберите карту или несколько карт и атакуйте.";
-    }
-  } else if (game.finished) {
-    statusLineEl.textContent = "Партия завершена.";
-  } else {
-    const turn = currentPlayerId();
-    const phaseLabel =
-      game.phase === "attack"
-        ? "Атака"
-        : game.phase === "defense"
-          ? "Защита"
-          : game.phase === "throw-in"
-            ? "Подкидывание"
-            : "Доброс после забора";
-    statusLineEl.textContent = turn ? `${phaseLabel}: ходит ${playerLabel(turn)}.` : phaseLabel;
   }
 
   centerCardsEl.innerHTML = "";
@@ -436,11 +549,6 @@ function renderCenter(): void {
       defense.classList.add("defense-card");
       wrap.append(defense);
     }
-
-    const label = document.createElement("div");
-    label.className = "pair-label";
-    label.textContent = pairLabel(pair);
-    wrap.append(label);
 
     centerCardsEl.append(wrap);
   });
@@ -481,13 +589,10 @@ function renderHand(): void {
 }
 
 function selectionText(): string {
-  if (!humanPlayer()?.isActive) return "Вы уже вышли из партии.";
+  const human = humanPlayer();
+  if (!human?.isActive) return "";
   if (selectedCards.length === 0) {
-    if (!humanTurn()) return "Ожидание хода.";
-    if (humanIsDefender() && game.phase === "defense") {
-      return "Выберите карту для защиты.";
-    }
-    return "Карты не выбраны.";
+    return roleText(HUMAN_ID);
   }
   const cardsText = selectedCards.join(", ");
   if (humanIsDefender() && game.phase === "defense") {
@@ -499,14 +604,9 @@ function selectionText(): string {
 }
 
 function renderHumanMeta(): void {
-  const human = humanPlayer();
-  const role = roleBadge(HUMAN_ID);
   humanPanelEl.className = `player${currentAttackerId() === HUMAN_ID ? " attacker" : ""}${currentDefenderId() === HUMAN_ID ? " defender" : ""}`;
-  humanMetaEl.textContent = human
-    ? human.isActive
-      ? `Карт: ${human.hand.length}${role.text ? ` · ${role.text}` : ""}`
-      : "Вне игры"
-    : "";
+  humanMetaEl.textContent = "";
+  statusLineEl.textContent = humanPrompt();
   selectedInfoEl.textContent = selectionText();
 }
 
@@ -531,11 +631,23 @@ function renderButtons(): void {
   const throwing = humanTurn() && (game.phase === "throw-in" || game.phase === "take" || game.phase === "attack") && !defending;
 
   attackBtn.textContent =
-    game.phase === "throw-in" || game.phase === "take" ? "Подкинуть" : "Атаковать";
+    game.phase === "throw-in" || game.phase === "take" ? "Подкинуть" : "Хожу";
+  defendBtn.textContent = "Крыть";
+  takeBtn.textContent = "Беру";
+  passBtn.textContent = game.phase === "take" ? "Пусть берёт" : "Пас";
+
   attackBtn.disabled = !throwing || !canHumanAttackSelection();
   defendBtn.disabled = !defending || selectedCards.length !== 1 || resolveDefenseTarget(selectedCards[0]) === null;
   takeBtn.disabled = !defending;
   passBtn.disabled = !humanTurn() || !["throw-in", "take"].includes(game.phase);
+
+  [attackBtn, defendBtn, takeBtn, passBtn].forEach(btn => {
+    btn.classList.remove("is-primary", "is-secondary", "is-danger");
+  });
+  if (!attackBtn.disabled) attackBtn.classList.add("is-primary");
+  if (!defendBtn.disabled) defendBtn.classList.add("is-primary");
+  if (!takeBtn.disabled) takeBtn.classList.add("is-primary");
+  if (!passBtn.disabled) passBtn.classList.add(game.phase === "take" ? "is-danger" : "is-secondary");
 }
 
 function render(): void {
@@ -545,6 +657,9 @@ function render(): void {
   renderHand();
   renderHumanMeta();
   renderButtons();
+  if (!game.finished && currentPlayerId() && currentPlayerId() !== HUMAN_ID) {
+    scheduleBots();
+  }
 }
 
 function dispatch(action: Parameters<typeof applyDurakAction>[1]): boolean {
@@ -564,6 +679,7 @@ function autoResolvePendingRound(): void {
   while (safety < 8 && ["throw-in", "take"].includes(game.phase)) {
     const turn = currentPlayerId();
     if (!turn) return;
+    if (canPlayerThrowCards(turn)) return;
     const advanced = dispatch({ type: "pass", playerId: turn });
     if (!advanced) return;
     safety += 1;
@@ -646,16 +762,50 @@ function pickBotDefense(playerId: string):
   return { type: "take", playerId };
 }
 
+function performBotTurn(playerId: string): boolean {
+  let ok = false;
+  if (game.phase === "defense" && playerId === currentDefenderId()) {
+    ok = dispatch(pickBotDefense(playerId));
+  } else if (game.phase === "throw-in" || game.phase === "take" || game.phase === "attack") {
+    const cards = pickBotAttack(playerId);
+    ok = cards
+      ? dispatch({ type: "attack", playerId, cards })
+      : dispatch({ type: "pass", playerId });
+  }
+  render();
+  return ok;
+}
+
+function flushHiddenBotTurns(): void {
+  let safety = 0;
+  while (safety < 12) {
+    autoResolvePendingRound();
+    if (game.finished) return;
+    const playerId = currentPlayerId();
+    if (!playerId || playerId === HUMAN_ID) return;
+    if (!["throw-in", "take"].includes(game.phase)) return;
+    const ok = performBotTurn(playerId);
+    if (!ok) return;
+    safety += 1;
+  }
+}
+
 function scheduleBots(): void {
   if (botTimer !== null) {
     window.clearTimeout(botTimer);
     botTimer = null;
   }
 
+  flushHiddenBotTurns();
   autoResolvePendingRound();
   if (game.finished) return;
   const turn = currentPlayerId();
   if (!turn || turn === HUMAN_ID) return;
+
+  if (["throw-in", "take"].includes(game.phase)) {
+    flushHiddenBotTurns();
+    return;
+  }
 
   botTimer = window.setTimeout(() => {
     botTimer = null;
@@ -663,17 +813,7 @@ function scheduleBots(): void {
     const playerId = currentPlayerId();
     if (!playerId || playerId === HUMAN_ID) return;
 
-    let ok = false;
-    if (game.phase === "defense" && playerId === currentDefenderId()) {
-      ok = dispatch(pickBotDefense(playerId));
-    } else if (game.phase === "throw-in" || game.phase === "take" || game.phase === "attack") {
-      const cards = pickBotAttack(playerId);
-      ok = cards
-        ? dispatch({ type: "attack", playerId, cards })
-        : dispatch({ type: "pass", playerId });
-    }
-
-    render();
+    const ok = performBotTurn(playerId);
     if (ok) {
       scheduleBots();
     }
@@ -760,3 +900,4 @@ passBtn.addEventListener("click", () => {
 
 render();
 scheduleBots();
+

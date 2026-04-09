@@ -9,11 +9,12 @@
   <body>
     <div class="durak-app">
       <header class="topbar">
-        <a class="back-link" href="./">Лобби</a>
-        <div class="title-block">
-          <span class="title-kicker">Карточный стол</span>
-          <h1>Подкидной дурак</h1>
-          <p>Классическая 36-карточная партия с козырем, подкидыванием и добором по кругу.</p>
+        <div class="topbar-main">
+          <a class="back-link" href="./">Лобби</a>
+          <div class="title-block">
+            <span class="title-kicker">Карточная игра</span>
+            <h1>«Дурак»</h1>
+          </div>
         </div>
         <div class="setup">
           <label for="playerCount">Игроков</label>
@@ -32,12 +33,28 @@
         <section id="opponents" class="opponents"></section>
 
         <section class="center">
-          <div class="center-head">
-            <div id="trumpInfo" class="trump-info"></div>
-            <div id="statusLine" class="status-line"></div>
-          </div>
           <div id="winnerBanner" class="winner-banner"></div>
-          <div id="centerCards" class="center-cards"></div>
+          <div class="table-stage">
+            <div id="centerCards" class="center-cards"></div>
+            <div id="trumpInfo" class="trump-info"></div>
+          </div>
+        </section>
+
+        <section id="humanPanel" class="player">
+          <div class="player-head">
+            <div class="player-identity">
+              <div class="player-avatar">1</div>
+              <div class="player-title-wrap">
+                <div class="player-title">Игрок 1</div>
+                <div id="humanMeta" class="human-meta"></div>
+              </div>
+            </div>
+          </div>
+          <div class="player-meta">
+            <div id="statusLine" class="status-line"></div>
+            <div id="selectedInfo" class="selected-info"></div>
+          </div>
+          <div id="hand" class="hand"></div>
           <div class="actions">
             <button id="attackBtn" type="button">Атаковать</button>
             <button id="defendBtn" type="button">Побить</button>
@@ -45,15 +62,6 @@
             <button id="passBtn" type="button">Пас</button>
           </div>
           <div id="log" class="log"></div>
-        </section>
-
-        <section id="humanPanel" class="player">
-          <div class="player-title">Игрок 1</div>
-          <div class="player-meta">
-            <div id="humanMeta" class="human-meta"></div>
-            <div id="selectedInfo" class="selected-info"></div>
-          </div>
-          <div id="hand" class="hand"></div>
         </section>
       </main>
     </div>
