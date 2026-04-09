@@ -13,6 +13,7 @@ mountAuthBadge({ mode: "inline", beforeSelector: "#downloadLogBtn", containerSel
 
 const HUMAN_ID = "P0";
 const BOT_DELAY_MS = 500;
+const PAGE_BASE_URL = new URL(".", window.location.href);
 
 const opponentsEl = document.querySelector("#opponents") as HTMLElement;
 const tableComboEl = document.querySelector("#tableCombo") as HTMLElement;
@@ -96,7 +97,10 @@ function isRed(card: MuCard): boolean {
 
 function cardAssetCandidates(code: string): string[] {
   const verbose = verboseCardAssetName(code);
-  const roots = ["/cards", "/assets/cards"];
+  const roots = [
+    new URL("cards", PAGE_BASE_URL).toString().replace(/\/$/, ""),
+    new URL("assets/cards", PAGE_BASE_URL).toString().replace(/\/$/, ""),
+  ];
   const names = [code, ...(verbose ? [verbose] : [])];
   const bases = roots.flatMap(root => names.map(name => `${root}/${name}`));
   const v = "cards-v2";

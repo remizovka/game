@@ -1,10 +1,11 @@
-type AuthMe = {
+﻿type AuthMe = {
   authenticated: boolean;
   user: null | { email: string; name: string | null };
 };
 
 const AUTH_API_BASE = "http://localhost:8787";
 const BADGE_ID = "authStatusBadge";
+const ACCOUNT_URL = new URL("account.html", window.location.href).toString();
 type MountAuthBadgeOptions = {
   mode?: "floating" | "inline";
   beforeSelector?: string;
@@ -91,7 +92,7 @@ function ensureBadge(options: MountAuthBadgeOptions = {}) {
   badge.innerHTML = `
     <span class="auth-dot"></span>
     <span class="auth-text">Проверяем вход...</span>
-    <a class="auth-link" href="/account.html">Кабинет</a>
+    <a class="auth-link" href="${ACCOUNT_URL}">Кабинет</a>
   `;
   if (mode === "inline") {
     const beforeEl = options.beforeSelector ? document.querySelector(options.beforeSelector) : null;

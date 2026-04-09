@@ -1,4 +1,4 @@
-import {
+﻿import {
   applyDurakAction,
   canBeatDurakCard,
   createDurakGame,
@@ -15,6 +15,7 @@ mountAuthBadge({ mode: "inline", beforeSelector: "#newGameBtn", containerSelecto
 
 const HUMAN_ID = "P0";
 const BOT_DELAY_MS = 650;
+const PAGE_BASE_URL = new URL(".", window.location.href);
 
 const opponentsEl = document.querySelector("#opponents") as HTMLElement;
 const trumpInfoEl = document.querySelector("#trumpInfo") as HTMLElement;
@@ -184,7 +185,10 @@ function verboseCardAssetName(code: string): string | null {
 
 function cardAssetCandidates(code: string): string[] {
   const verbose = verboseCardAssetName(code);
-  const roots = ["/cards", "/assets/cards"];
+  const roots = [
+    new URL("cards", PAGE_BASE_URL).toString().replace(/\/$/, ""),
+    new URL("assets/cards", PAGE_BASE_URL).toString().replace(/\/$/, ""),
+  ];
   const names = [code, ...(verbose ? [verbose] : [])];
   const bases = roots.flatMap(root => names.map(name => `${root}/${name}`));
   const version = "cards-v2";

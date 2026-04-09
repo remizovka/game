@@ -1,4 +1,4 @@
-import {
+﻿import {
   applyMove,
   assignSuitsFromPrevJC,
   cardPoints,
@@ -41,6 +41,7 @@ const BOT_DELAY_MS = 400;
 const TRICK_HOLD_MS = 2000;
 const NEXT_DEAL_DELAY_MS = 2000;
 const SIMULATION_DELAY_MS = 1000;
+const PAGE_BASE_URL = new URL(".", window.location.href);
 let matchOver = false;
 let pendingFinalize = false;
 let runTimer: number | null = null;
@@ -181,7 +182,10 @@ function verboseBelkaCardAssetName(code: string): string | null {
 
 function belkaCardAssetCandidates(code: string): string[] {
   const verbose = verboseBelkaCardAssetName(code);
-  const roots = ["/cards", "/assets/cards"];
+  const roots = [
+    new URL("cards", PAGE_BASE_URL).toString().replace(/\/$/, ""),
+    new URL("assets/cards", PAGE_BASE_URL).toString().replace(/\/$/, ""),
+  ];
   const names = [code, ...(verbose ? [verbose] : [])];
   const bases = roots.flatMap(root => names.map(name => `${root}/${name}`));
   const v = "cards-v2";
@@ -258,7 +262,7 @@ function renderCard(card: Card, small = false, faceDown = false): HTMLElement {
 function eyesAssetUrl(eyes: number, color: "black" | "red"): string {
   const suitName = color === "black" ? "крести" : "черви";
   const fileName = `${eyes} глаз ${suitName}.svg`;
-  return `/cards/${encodeURIComponent(fileName)}`;
+  return new URL(`cards/${encodeURIComponent(fileName)}`, PAGE_BASE_URL).toString();
 }
 
 function renderHand(player: PlayerId, hand: Card[]) {
