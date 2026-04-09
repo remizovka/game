@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Мю</title>
+    <link rel="stylesheet" href="/src/mu.css" />
+  </head>
+  <body>
+    <div class="mu-app">
+      <header class="topbar">
+        <a class="back-link" href="/">Лобби</a>
+        <div class="title-block">
+          <span class="title-kicker">Турнирный стол</span>
+          <h1>Мю</h1>
+          <p>Более резкий темп, сильнее акценты на ходе, стеке и приближении к финалу.</p>
+        </div>
+        <div class="setup">
+          <label for="playerCount">Игроков</label>
+          <select id="playerCount">
+            <option value="3">3</option>
+            <option value="4" selected>4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+          </select>
+          <button id="newGameBtn" type="button">Новая партия</button>
+          <button id="downloadLogBtn" type="button">Скачать лог</button>
+        </div>
+      </header>
+
+      <main class="table">
+        <section class="opponents" id="opponents"></section>
+
+        <section class="center">
+          <div class="center-title">Текущий стек</div>
+          <div id="tableCombo" class="table-combo"></div>
+          <div id="winnerBanner" class="winner-banner"></div>
+          <div id="centerCards" class="center-cards"></div>
+          <div class="actions">
+            <button id="passBtn" type="button">Пас</button>
+            <button id="playBtn" type="button">Ходить</button>
+          </div>
+          <div id="log" class="log"></div>
+        </section>
+
+        <section id="humanPanel" class="player">
+          <div class="player-title">Игрок 1 (вы) <span id="humanOneCard" class="one-card-badge">Одна карта</span></div>
+          <div class="player-meta">
+            <div id="humanMeta" class="human-meta"></div>
+            <div id="selected" class="selected"></div>
+            <div id="hints" class="hints"></div>
+          </div>
+          <div id="humanLastMove" class="last-move"></div>
+          <div id="hand" class="hand"></div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/src/mu.ts"></script>
+  </body>
+</html>

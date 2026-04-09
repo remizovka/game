@@ -1,0 +1,20 @@
+{
+  "name": "belka",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test \"dist/tests/*.test.js\"",
+    "demo": "npm run build && node dist/src/demo.js",
+    "dev": "vite",
+    "auth:dev": "node server/auth-server.js",
+    "build:web": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.0",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.8"
+  }
+}

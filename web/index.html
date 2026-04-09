@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Белка, Мю и Дурак</title>
+    <link rel="stylesheet" href="/src/lobby.css" />
+  </head>
+  <body>
+    <main class="lobby">
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Локальный карточный клуб</p>
+          <h1>Белка, Мю и Дурак в одном лобби</h1>
+          <p class="lead">
+            Вместо скучного списка здесь теперь афиша: три разные игры, быстрый вход в кабинет и
+            понятный путь от лобби до партии прямо в браузере.
+          </p>
+          <div class="hero-actions">
+            <a class="hero-link hero-link-belka" href="/belka.html">Открыть Белку</a>
+            <a class="hero-link hero-link-mu" href="/mu.html">Запустить Мю</a>
+            <a class="hero-link hero-link-durak" href="/durak.html">Открыть Дурака</a>
+            <a class="hero-link hero-link-account" href="/account.html">Кабинет</a>
+          </div>
+          <div class="hero-stats" aria-label="Особенности портала">
+            <div class="stat">
+              <span class="stat-value">3</span>
+              <span class="stat-label">разных игровых мира</span>
+            </div>
+            <div class="stat">
+              <span class="stat-value">1</span>
+              <span class="stat-label">локальный auth API</span>
+            </div>
+            <div class="stat">
+              <span class="stat-value">0</span>
+              <span class="stat-label">лишних экранов до старта</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="hero-stage" aria-hidden="true">
+          <div class="stage-panel stage-panel-belka">
+            <div class="stage-kicker">Белка</div>
+            <div class="stage-title">Классический клубный стол</div>
+            <div class="stage-fan">
+              <span class="fan-card">A♣</span>
+              <span class="fan-card">10♥</span>
+              <span class="fan-card">J♠</span>
+            </div>
+          </div>
+          <div class="stage-panel stage-panel-mu">
+            <div class="stage-kicker">Мю</div>
+            <div class="stage-title">Быстрый турнирный ритм</div>
+            <div class="stage-track">
+              <span class="track-pill">стек</span>
+              <span class="track-pill">перехват</span>
+              <span class="track-pill">финал</span>
+            </div>
+          </div>
+          <div class="stage-panel stage-panel-durak">
+            <div class="stage-kicker">Дурак</div>
+            <div class="stage-title">Козырь, подкид и добор до шести</div>
+            <div class="stage-track">
+              <span class="track-pill">атака</span>
+              <span class="track-pill">защита</span>
+              <span class="track-pill">забор</span>
+            </div>
+          </div>
+          <div class="stage-orb stage-orb-a"></div>
+          <div class="stage-orb stage-orb-b"></div>
+        </div>
+      </section>
+
+      <section class="games">
+        <a class="game-card account" href="/account.html">
+          <div class="card-kicker">Профиль</div>
+          <h2>Кабинет</h2>
+          <p>Вход, регистрация и проверка авторизации без отрыва от игрового лобби.</p>
+          <div class="game-meta">
+            <span>Локальный auth</span>
+            <span>Профиль игрока</span>
+            <span>Быстрый переход</span>
+          </div>
+          <span class="card-cta">Открыть кабинет</span>
+        </a>
+        <a class="game-card belka" href="/belka.html">
+          <div class="card-kicker">Клубный режим</div>
+          <h2>Белка</h2>
+          <p>Премиальный стол с выделенным козырем, читаемым счётом и драматичным центром взятки.</p>
+          <div class="game-meta">
+            <span>4 игрока</span>
+            <span>Командная партия</span>
+            <span>Сукно и латунь</span>
+          </div>
+          <span class="card-cta">Открыть Белку</span>
+        </a>
+        <a class="game-card mu" href="/mu.html">
+          <div class="card-kicker">Турнирный режим</div>
+          <h2>Мю</h2>
+          <p>Более резкий ритм, яркий стек на столе, сильнее видны угрозы, финал и темп партии.</p>
+          <div class="game-meta">
+            <span>3-7 игроков</span>
+            <span>Стек и перехват</span>
+            <span>Графит и неон</span>
+          </div>
+          <span class="card-cta">Запустить Мю</span>
+        </a>
+        <a class="game-card durak" href="/durak.html">
+          <div class="card-kicker">Классика с козырем</div>
+          <h2>Подкидной дурак</h2>
+          <p>Классическая партия на 36 карт: атака, защита, подкидывание по рангу и забор всего стола.</p>
+          <div class="game-meta">
+            <span>2-6 игроков</span>
+            <span>Козырь и забор</span>
+            <span>Классические правила</span>
+          </div>
+          <span class="card-cta">Открыть Дурака</span>
+        </a>
+      </section>
+
+      <section class="lobby-footer">
+        <p>
+          Лобби теперь не маскирует игры под одинаковые плитки: Белка ощущается как карточный клуб,
+          Мю как соревновательный стол, Дурак как классическая игра на выбывание, а кабинет остаётся
+          служебной точкой входа.
+        </p>
+      </section>
+    </main>
+    <script type="module" src="/src/lobby.ts"></script>
+  </body>
+</html>

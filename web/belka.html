@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Белка</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div id="app" class="app">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark">♣</div>
+          <div class="brand-copy">
+            <div class="brand-title">Белка</div>
+            <div class="brand-sub">Клубный стол, командный ритм, акцент на взятке</div>
+          </div>
+        </div>
+        <div class="status">
+          <div class="status-group status-group-primary">
+            <a href="/" class="chip button-chip">Лобби</a>
+            <div id="leader" class="chip">Ходит: —</div>
+            <div id="lastWinner" class="chip">Взятку взял: —</div>
+          </div>
+          <div class="status-group status-group-secondary">
+            <div id="trump" class="chip">Козырь: —</div>
+            <div id="trumpOwner" class="chip">Козырь у: —</div>
+            <div id="matchScore" class="chip">Счет: 0:0</div>
+            <div id="deal" class="chip">Раздача: 0</div>
+          </div>
+          <div class="status-group status-group-actions">
+            <button id="simulationToggle" class="chip button-chip">Симуляция: выкл</button>
+            <button id="fastSim10" class="chip button-chip">Быстрая симуляция x10</button>
+            <button id="downloadLog" class="chip button-chip">Скачать лог</button>
+          </div>
+        </div>
+      </header>
+
+      <div class="banner" id="banner"></div>
+      <div class="restart-wrap">
+        <button id="restartGame" class="restart-btn">Начать заново</button>
+      </div>
+
+      <main class="table">
+        <section class="player top" id="player-P2" data-team="A">
+          <div class="player-name">Игрок 3</div>
+          <div class="hand" data-player="P2"></div>
+          <div class="hand-meta" data-meta="P2"></div>
+          <div class="hand-trump"><span class="trump-mark" data-trump-mark="P2"></span></div>
+        </section>
+
+        <section class="player left" id="player-P3" data-team="B">
+          <div class="player-name">Игрок 4</div>
+          <div class="hand" data-player="P3"></div>
+          <div class="hand-meta" data-meta="P3"></div>
+          <div class="hand-trump"><span class="trump-mark" data-trump-mark="P3"></span></div>
+        </section>
+
+        <section class="center">
+          <div class="center-label">Текущая взятка</div>
+          <div class="trick" id="trick">
+            <div class="trick-slot top" data-slot="P2"></div>
+            <div class="trick-slot right" data-slot="P1"></div>
+            <div class="trick-slot left" data-slot="P3"></div>
+            <div class="trick-slot bottom" data-slot="P0"></div>
+          </div>
+          <div class="scores">
+            <div class="score-card">
+              <div class="label">Очки A</div>
+              <div id="score-A" class="value">0</div>
+            </div>
+            <div class="score-card">
+              <div class="label">Очки B</div>
+              <div id="score-B" class="value">0</div>
+            </div>
+            <div class="score-card">
+              <div class="label">Глаза A</div>
+              <div id="game-A" class="value">0</div>
+            </div>
+            <div class="score-card">
+              <div class="label">Глаза B</div>
+              <div id="game-B" class="value">0</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="player right" id="player-P1" data-team="B">
+          <div class="player-name">Игрок 2</div>
+          <div class="hand" data-player="P1"></div>
+          <div class="hand-meta" data-meta="P1"></div>
+          <div class="hand-trump"><span class="trump-mark" data-trump-mark="P1"></span></div>
+        </section>
+
+        <section class="player bottom" id="player-P0" data-team="A" data-human="true">
+          <div class="player-name">Игрок 1 (ты)</div>
+          <div class="hand" data-player="P0"></div>
+          <div class="hand-meta" data-meta="P0"></div>
+          <div class="hand-trump"><span class="trump-mark" data-trump-mark="P0"></span></div>
+        </section>
+      </main>
+
+      <div id="debug" class="debug"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

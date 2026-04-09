@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Кабинет игрока</title>
+    <link rel="stylesheet" href="/src/account.css" />
+  </head>
+  <body>
+    <main class="account-shell">
+      <header class="account-top">
+        <a href="/" class="btn ghost">Лобби</a>
+        <h1>Кабинет игрока</h1>
+        <span></span>
+      </header>
+
+      <section class="card" id="authCard">
+        <div class="tabs">
+          <button class="tab active" data-tab="login">Вход</button>
+          <button class="tab" data-tab="register">Регистрация</button>
+        </div>
+
+        <form id="loginForm" class="form active">
+          <label>Email <input type="email" name="email" required /></label>
+          <label>Пароль <input type="password" name="password" minlength="6" required /></label>
+          <button class="btn primary" type="submit">Войти</button>
+        </form>
+
+        <form id="registerForm" class="form">
+          <label>Имя <input type="text" name="name" /></label>
+          <label>Email <input type="email" name="email" required /></label>
+          <label>Пароль <input type="password" name="password" minlength="6" required /></label>
+          <button class="btn primary" type="submit">Создать аккаунт</button>
+        </form>
+
+        <div class="divider">или</div>
+        <button id="googleBtn" class="btn google" type="button">Войти через Google (скоро)</button>
+        <p id="authMsg" class="msg"></p>
+      </section>
+
+      <section class="card hidden" id="profileCard">
+        <div class="profile-head">
+          <div>
+            <h2 id="profileName">Игрок</h2>
+            <p id="profileEmail"></p>
+          </div>
+          <button id="logoutBtn" class="btn ghost" type="button">Выйти</button>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat">
+            <div class="stat-title">Белка</div>
+            <div class="stat-line">Игр: <span id="belkaGames">0</span></div>
+            <div class="stat-line">Побед: <span id="belkaWins">0</span></div>
+          </div>
+          <div class="stat">
+            <div class="stat-title">Мю</div>
+            <div class="stat-line">Игр: <span id="muGames">0</span></div>
+            <div class="stat-line">Побед: <span id="muWins">0</span></div>
+          </div>
+        </div>
+
+        <div class="note">
+          Дальше сюда можно добавить: историю игр, рейтинг, достижения, настройки.
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/src/account.ts"></script>
+  </body>
+  </html>
+

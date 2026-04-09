@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Подкидной дурак</title>
+    <link rel="stylesheet" href="/src/durak.css" />
+  </head>
+  <body>
+    <div class="durak-app">
+      <header class="topbar">
+        <a class="back-link" href="/">Лобби</a>
+        <div class="title-block">
+          <span class="title-kicker">Карточный стол</span>
+          <h1>Подкидной дурак</h1>
+          <p>Классическая 36-карточная партия с козырем, подкидыванием и добором по кругу.</p>
+        </div>
+        <div class="setup">
+          <label for="playerCount">Игроков</label>
+          <select id="playerCount">
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4" selected>4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+          </select>
+          <button id="newGameBtn" type="button">Новая партия</button>
+        </div>
+      </header>
+
+      <main class="table">
+        <section id="opponents" class="opponents"></section>
+
+        <section class="center">
+          <div class="center-head">
+            <div id="trumpInfo" class="trump-info"></div>
+            <div id="statusLine" class="status-line"></div>
+          </div>
+          <div id="winnerBanner" class="winner-banner"></div>
+          <div id="centerCards" class="center-cards"></div>
+          <div class="actions">
+            <button id="attackBtn" type="button">Атаковать</button>
+            <button id="defendBtn" type="button">Побить</button>
+            <button id="takeBtn" type="button">Забрать</button>
+            <button id="passBtn" type="button">Пас</button>
+          </div>
+          <div id="log" class="log"></div>
+        </section>
+
+        <section id="humanPanel" class="player">
+          <div class="player-title">Игрок 1</div>
+          <div class="player-meta">
+            <div id="humanMeta" class="human-meta"></div>
+            <div id="selectedInfo" class="selected-info"></div>
+          </div>
+          <div id="hand" class="hand"></div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/src/durak.ts"></script>
+  </body>
+</html>
