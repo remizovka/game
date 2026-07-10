@@ -117,6 +117,62 @@ test("Mu round: announce_one_card action has no scoring effect", () => {
   assert.equal(finish.state.penaltyDelta.P2, 1);
 });
 
+test("Mu game: deal passes to next seat when the dealer is eliminated", () => {
+  let game = createMuGame({
+    players: ["P0", "P1", "P2", "P3", "P4"],
+    dealerId: "P1",
+    rng: () => 0,
+  });
+
+  game = {
+    ...game,
+    standings: {
+      P0: { id: "P0", penalty: 0, eliminated: false },
+      P1: { id: "P1", penalty: 49, eliminated: false },
+      P2: { id: "P2", penalty: 0, eliminated: false },
+      P3: { id: "P3", penalty: 0, eliminated: false },
+      P4: { id: "P4", penalty: 0, eliminated: false },
+    },
+    currentRound: {
+      ...game.currentRound!,
+      hands: {
+        P0: ["7C"],
+        P1: ["8C"],
+        P2: ["9C"],
+        P3: ["10C"],
+        P4: ["JC"],
+      },
+      initialHandSizes: {
+        P0: 1,
+        P1: 1,
+        P2: 1,
+        P3: 1,
+        P4: 1,
+      },
+      oneCardAnnounced: {
+        P0: false,
+        P1: false,
+        P2: false,
+        P3: false,
+        P4: false,
+      },
+      circle: createMuCircle(["P0", "P1", "P2", "P3", "P4"], "P0"),
+    },
+  };
+
+  const result = applyMuGameAction(game, {
+    type: "play",
+    playerId: "P0",
+    cards: ["7C"],
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.state.finished, false);
+  assert.equal(result.state.standings.P1.eliminated, true);
+  assert.equal(result.state.dealerId, "P2");
+  assert.equal(result.state.currentRound?.dealerId, "P2");
+});
+
 test("Mu game: player is eliminated at 50 and match ends with two players", () => {
   let game = createMuGame({
     players: ["P0", "P1", "P2"],

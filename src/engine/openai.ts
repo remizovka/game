@@ -38,6 +38,7 @@ export async function callOpenAi(
     model,
     messages: buildAdviceMessages(payload),
     temperature: 0.2,
+    response_format: { type: "json_object" },
   };
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -47,6 +48,7 @@ export async function callOpenAi(
       authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30_000),
   });
 
   if (!response.ok) {
@@ -60,5 +62,13 @@ export async function callOpenAi(
     throw new Error("Invalid OpenAI response");
   }
 
-  return JSON.parse(content) as OpenAiAdviceResponse;
+  const cleaned = content
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "");
+  try {
+    return JSON.parse(cleaned) as OpenAiAdviceResponse;
+  } catch {
+    throw new Error(`OpenAI returned non-JSON content: ${cleaned.slice(0, 200)}`);
+  }
 }

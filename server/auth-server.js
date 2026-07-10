@@ -7,30 +7,112 @@ const PORT = Number(process.env.AUTH_PORT || 8787);
 const DATA_DIR = path.join(__dirname, "data");
 const DB_FILE = path.join(DATA_DIR, "auth-db.json");
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
+const MAX_PASSWORD_LENGTH = 128;
+const MAX_EMAIL_LENGTH = 254;
+const MAX_NAME_LENGTH = 100;
 
-function ensureDb() {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  if (!fs.existsSync(DB_FILE)) {
-    fs.writeFileSync(DB_FILE, JSON.stringify({ users: [], sessions: [] }, null, 2), "utf8");
+// Разрешенные origin'ы фронтенда. Не отражаем произвольный localhost-порт:
+// куки localhost общие для всех портов, и credentialed CORS на любой порт
+// отдал бы сессию любому локальному приложению.
+const DEFAULT_ALLOWED_ORIGINS = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://localhost:4173",
+  "http://127.0.0.1:4173",
+];
+const ALLOWED_ORIGINS = new Set(
+  [
+    ...DEFAULT_ALLOWED_ORIGINS,
+    ...String(process.env.AUTH_ALLOWED_ORIGINS || "")
+      .split(",")
+      .map(origin => origin.trim())
+      .filter(Boolean),
+  ].map(origin => origin.toLowerCase())
+);
+
+// Простое ограничение частоты попыток входа/регистрации на IP.
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const RATE_LIMIT_MAX_ATTEMPTS = 20;
+const rateBuckets = new Map();
+
+function isRateLimited(ip) {
+  const now = Date.now();
+  const bucket = rateBuckets.get(ip);
+  if (!bucket || now - bucket.start > RATE_LIMIT_WINDOW_MS) {
+    rateBuckets.set(ip, { start: now, count: 1 });
+    return false;
   }
+  bucket.count += 1;
+  if (rateBuckets.size > 10000) rateBuckets.clear();
+  return bucket.count > RATE_LIMIT_MAX_ATTEMPTS;
+}
+
+function ensureDataDir() {
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+function normalizeDb(raw) {
+  const db = raw && typeof raw === "object" ? raw : {};
+  return {
+    users: Array.isArray(db.users) ? db.users : [],
+    sessions: Array.isArray(db.sessions) ? db.sessions : [],
+  };
 }
 
 function readDb() {
-  ensureDb();
+  ensureDataDir();
+  if (!fs.existsSync(DB_FILE)) {
+    return { users: [], sessions: [] };
+  }
   try {
-    return JSON.parse(fs.readFileSync(DB_FILE, "utf8"));
-  } catch {
+    return normalizeDb(JSON.parse(fs.readFileSync(DB_FILE, "utf8")));
+  } catch (err) {
+    // Поврежденный файл откладываем в сторону, чтобы не затереть данные
+    // следующей записью и дать шанс восстановить их вручную.
+    const backup = `${DB_FILE}.corrupt-${Date.now()}`;
+    try {
+      fs.renameSync(DB_FILE, backup);
+      console.error(`auth-db.json поврежден (${err.message}); файл сохранен как ${backup}`);
+    } catch (renameErr) {
+      console.error(`auth-db.json поврежден и не удалось сделать резервную копию: ${renameErr.message}`);
+    }
     return { users: [], sessions: [] };
   }
 }
 
 function writeDb(db) {
-  ensureDb();
-  fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), "utf8");
+  ensureDataDir();
+  // Атомарная запись: временный файл + rename, чтобы обрыв процесса
+  // не оставил наполовину записанный JSON.
+  const tmp = `${DB_FILE}.tmp-${process.pid}`;
+  const payload = JSON.stringify(db, null, 2);
+  fs.writeFileSync(tmp, payload, "utf8");
+  // На Windows rename поверх существующего файла может дать EPERM/EBUSY,
+  // пока файл держит антивирус или индексатор — пробуем несколько раз.
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      fs.renameSync(tmp, DB_FILE);
+      return;
+    } catch (err) {
+      if (err.code !== "EPERM" && err.code !== "EACCES" && err.code !== "EBUSY") {
+        try { fs.unlinkSync(tmp); } catch {}
+        throw err;
+      }
+      const until = Date.now() + 10 * (attempt + 1);
+      while (Date.now() < until) { /* короткое синхронное ожидание */ }
+    }
+  }
+  // Rename так и не прошел — пишем напрямую, чтобы не потерять данные.
+  fs.writeFileSync(DB_FILE, payload, "utf8");
+  try { fs.unlinkSync(tmp); } catch {}
 }
 
 function now() {
   return Date.now();
+}
+
+function pruneSessions(db) {
+  db.sessions = db.sessions.filter(s => s.expiresAt > now());
 }
 
 function normalizeEmail(email) {
@@ -45,7 +127,13 @@ function parseCookies(req) {
     if (idx === -1) return;
     const k = part.slice(0, idx).trim();
     const v = part.slice(idx + 1).trim();
-    out[k] = decodeURIComponent(v);
+    try {
+      out[k] = decodeURIComponent(v);
+    } catch {
+      // Куки чужих localhost-приложений могут содержать сырой "%" —
+      // не даем им ронять каждый запрос.
+      out[k] = v;
+    }
   });
   return out;
 }
@@ -75,10 +163,11 @@ function sendNoContent(res, origin) {
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
+    req.setEncoding("utf8");
     let raw = "";
     req.on("data", chunk => {
       raw += chunk;
-      if (raw.length > 1024 * 1024) {
+      if (raw.length > 64 * 1024) {
         reject(new Error("Body too large"));
         req.destroy();
       }
@@ -100,6 +189,11 @@ function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
   return { salt, digest };
 }
 
+// Фиктивный хеш, чтобы логин с несуществующим email занимал столько же
+// времени, сколько и с существующим (иначе по времени ответа можно
+// перечислять зарегистрированные адреса).
+const DUMMY_HASH = hashPassword("dummy-password-for-timing");
+
 function verifyPassword(password, passwordHash) {
   if (!passwordHash || !passwordHash.salt || !passwordHash.digest) return false;
   const digest = crypto.scryptSync(password, passwordHash.salt, 64).toString("hex");
@@ -116,7 +210,6 @@ function createSession(db, userId) {
     createdAt: now(),
     expiresAt: now() + SESSION_TTL_MS,
   };
-  db.sessions = db.sessions.filter(s => s.expiresAt > now());
   db.sessions.push(record);
   return record;
 }
@@ -152,7 +245,7 @@ function getSessionUser(req, db) {
 
 function isAllowedOrigin(origin) {
   if (!origin) return false;
-  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+  return ALLOWED_ORIGINS.has(String(origin).toLowerCase());
 }
 
 async function handle(req, res) {
@@ -170,26 +263,39 @@ async function handle(req, res) {
 
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   const pathname = url.pathname;
-  const db = readDb();
-  db.sessions = db.sessions.filter(s => s.expiresAt > now());
+  const clientIp = req.socket.remoteAddress || "unknown";
 
   if (pathname === "/api/auth/health" && req.method === "GET") {
     return sendJson(res, 200, { ok: true }, origin);
   }
 
   if (pathname === "/api/auth/me" && req.method === "GET") {
+    const db = readDb();
+    pruneSessions(db);
     const user = getSessionUser(req, db);
-    writeDb(db);
     return sendJson(res, 200, { authenticated: !!user, user: user ? publicUser(user) : null }, origin);
   }
 
   if (pathname === "/api/auth/register" && req.method === "POST") {
+    if (isRateLimited(clientIp)) {
+      return sendJson(res, 429, { error: "Слишком много попыток, попробуйте через минуту" }, origin);
+    }
+    // Тело читаем до чтения базы: между readDb и writeDb не должно быть await,
+    // иначе параллельный запрос перезапишет чужие изменения устаревшим снимком.
     const body = await readBody(req);
     const email = normalizeEmail(body.email);
     const password = String(body.password || "");
-    const name = String(body.name || "").trim();
-    if (!email || !email.includes("@")) return sendJson(res, 400, { error: "Некорректный email" }, origin);
+    const name = String(body.name || "").trim().slice(0, MAX_NAME_LENGTH);
+    if (!email || !email.includes("@") || email.length > MAX_EMAIL_LENGTH) {
+      return sendJson(res, 400, { error: "Некорректный email" }, origin);
+    }
     if (password.length < 6) return sendJson(res, 400, { error: "Пароль минимум 6 символов" }, origin);
+    if (password.length > MAX_PASSWORD_LENGTH) {
+      return sendJson(res, 400, { error: `Пароль не длиннее ${MAX_PASSWORD_LENGTH} символов` }, origin);
+    }
+
+    const db = readDb();
+    pruneSessions(db);
     if (db.users.some(u => u.email === email)) return sendJson(res, 409, { error: "Пользователь уже существует" }, origin);
 
     const id = crypto.randomUUID();
@@ -211,11 +317,18 @@ async function handle(req, res) {
   }
 
   if (pathname === "/api/auth/login" && req.method === "POST") {
+    if (isRateLimited(clientIp)) {
+      return sendJson(res, 429, { error: "Слишком много попыток, попробуйте через минуту" }, origin);
+    }
     const body = await readBody(req);
     const email = normalizeEmail(body.email);
-    const password = String(body.password || "");
+    const password = String(body.password || "").slice(0, MAX_PASSWORD_LENGTH);
+
+    const db = readDb();
+    pruneSessions(db);
     const user = db.users.find(u => u.email === email);
-    if (!user || !verifyPassword(password, user.passwordHash)) {
+    const passwordOk = verifyPassword(password, user ? user.passwordHash : DUMMY_HASH) && !!user;
+    if (!passwordOk) {
       return sendJson(res, 401, { error: "Неверный email или пароль" }, origin);
     }
     const session = createSession(db, user.id);
@@ -225,6 +338,8 @@ async function handle(req, res) {
   }
 
   if (pathname === "/api/auth/logout" && req.method === "POST") {
+    const db = readDb();
+    pruneSessions(db);
     const token = parseCookies(req).sid;
     if (token) db.sessions = db.sessions.filter(s => s.token !== token);
     writeDb(db);
@@ -254,12 +369,15 @@ async function handle(req, res) {
 const server = http.createServer((req, res) => {
   handle(req, res).catch(err => {
     console.error(err);
-    sendJson(res, 500, { error: "Server error" }, isAllowedOrigin(req.headers.origin) ? req.headers.origin : "");
+    if (!res.headersSent) {
+      sendJson(res, 500, { error: "Server error" }, isAllowedOrigin(req.headers.origin) ? req.headers.origin : "");
+    } else {
+      res.end();
+    }
   });
 });
 
 server.listen(PORT, () => {
-  ensureDb();
+  ensureDataDir();
   console.log(`Auth server listening on http://localhost:${PORT}`);
 });
-

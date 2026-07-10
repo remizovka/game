@@ -94,7 +94,7 @@ body::before {
 }
 
 .back-link::before {
-  content: "в†ђ";
+  content: "←";
   font-size: 1.8rem;
   line-height: 1;
   color: rgba(255, 255, 255, 0.56);
@@ -190,7 +190,8 @@ select option {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.03));
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
   transition: transform 160ms ease, border-color 160ms ease, background 160ms ease, opacity 160ms ease;
-  z-index: 2;
+  z-index: 10;
+  pointer-events: auto;
 }
 
 .opp.active {
@@ -345,6 +346,7 @@ select option {
   position: relative;
   min-height: calc(100dvh - 72px - 220px);
   z-index: 1;
+  pointer-events: none;
 }
 
 .table-stage {
@@ -372,6 +374,7 @@ select option {
 
 .winner-banner.show {
   display: block;
+  pointer-events: auto;
 }
 
 .winner-title {
@@ -404,19 +407,22 @@ select option {
 }
 
 .trump-info {
-  position: absolute;
-  left: 50%;
-  top: 57%;
-  width: min(620px, 64vw);
-  height: 176px;
-  transform: translate(-50%, -50%);
-  pointer-events: none;
+  grid-area: trump;
+  position: relative;
+  pointer-events: auto;
   z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
 }
 
 .deck-cluster {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  width: 100px;
+  height: 110px;
 }
 
 .stack-cluster {
@@ -428,15 +434,15 @@ select option {
 }
 
 .stack-cluster.trump {
-  left: 18px;
-  top: 50%;
-  transform: translateY(-50%);
+  left: 0;
+  bottom: 0;
+  z-index: 1;
 }
 
 .stack-cluster.deck {
-  right: 18px;
-  top: 50%;
-  transform: translateY(-50%);
+  left: 8px;
+  top: 0;
+  z-index: 2;
 }
 
 .stack-caption {
@@ -460,29 +466,36 @@ select option {
 }
 
 .stack-pile .card.stack-back-1 {
-  transform: translate(0, -8px);
+  transform: translate(-1px, -2px);
 }
 
 .stack-pile .card.stack-back-2 {
-  transform: translate(0, -16px);
+  transform: translate(-2px, -4px);
 }
 
 .stack-pile .card.stack-back-3 {
-  transform: translate(0, -24px);
+  transform: translate(-3px, -6px);
 }
 
 .stack-pile .card.stack-back-4 {
-  transform: translate(0, -32px);
+  transform: translate(-4px, -8px);
 }
 
 .stack-pile .card.stack-trump-card {
-  transform: translate(-14px, 4px);
-  box-shadow: 0 18px 28px rgba(0, 0, 0, 0.28);
+  transform: rotate(90deg) translateY(12px);
+  transform-origin: center center;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
 }
 
-.stack-pile .card.stack-single-card {
-  transform: none;
-  box-shadow: 0 18px 28px rgba(0, 0, 0, 0.28);
+.trump-suit-only {
+  width: 58px;
+  height: 84px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  font-size: 38px;
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.8);
 }
 
 .stack-count {
@@ -499,17 +512,18 @@ select option {
 .center-cards {
   position: absolute;
   left: 50%;
-  top: 67%;
-  width: min(420px, calc(100% - 360px));
-  min-height: 224px;
+  top: calc(50% + 30px);
+  width: min(680px, calc(100% - 320px));
+  min-height: 180px;
   transform: translate(-50%, -50%);
-  display: grid;
-  grid-template-columns: repeat(3, minmax(96px, 118px));
+  display: flex;
+  flex-wrap: wrap;
   justify-content: center;
-  align-content: center;
-  gap: 16px 20px;
-  padding: 18px 0 26px;
+  align-items: center;
+  gap: 14px 18px;
+  padding: 18px 12px 26px;
   z-index: 4;
+  pointer-events: none;
 }
 
 .center-empty {
@@ -520,8 +534,10 @@ select option {
 
 .table-pair {
   position: relative;
-  width: 106px;
-  height: 150px;
+  width: 100px;
+  height: 140px;
+  flex: 0 0 auto;
+  pointer-events: auto;
   transition: transform 140ms ease, filter 140ms ease;
 }
 
@@ -529,17 +545,19 @@ select option {
   position: absolute;
   left: 0;
   top: 0;
-  width: 72px;
-  height: 104px;
+  width: 68px;
+  height: 98px;
+  z-index: 1;
 }
 
 .table-pair .card.defense-card {
   position: absolute;
-  right: 0;
-  bottom: 0;
-  transform: rotate(8deg);
-  width: 72px;
-  height: 104px;
+  left: 22px;
+  top: 28px;
+  transform: rotate(6deg);
+  width: 68px;
+  height: 98px;
+  z-index: 2;
 }
 
 .table-pair.unresolved::after {
@@ -570,15 +588,24 @@ select option {
   position: absolute;
   left: 50%;
   bottom: 18px;
-  width: min(860px, calc(100% - 36px));
+  width: min(1060px, calc(100% - 36px));
   transform: translateX(-50%);
-  padding: 0;
-  border: none;
-  background: transparent;
-  box-shadow: none;
+  z-index: 12;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto auto 1fr;
+  grid-template-areas:
+    "head head"
+    "meta trump"
+    "hand trump"
+    "actions actions"
+    "log log";
+  align-items: end;
+  gap: 0 12px;
 }
 
 .player-head {
+  grid-area: head;
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
@@ -598,29 +625,72 @@ select option {
 }
 
 .player-meta {
+  grid-area: meta;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin: 10px 0 0;
+  margin-top: 10px;
 }
 
 .status-line,
 .selected-info {
-  max-width: min(560px, 100%);
-  min-height: 42px;
-  padding: 10px 14px;
-  border-radius: 8px;
-  display: flex;
+  max-width: min(420px, 100%);
+  min-height: 28px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  display: inline-flex;
   align-items: center;
-  background: var(--bubble-bg);
-  color: var(--bubble-text);
-  box-shadow: 0 12px 22px rgba(0, 0, 0, 0.18);
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  font-weight: 500;
+  backdrop-filter: blur(6px);
+  box-shadow: none;
+  opacity: 0.85;
+  transition: opacity 200ms ease;
 }
 
 .selected-info {
-  min-height: 32px;
-  padding: 6px 12px;
-  background: var(--bubble-warn);
+  min-height: 24px;
+  padding: 4px 10px;
+  background: rgba(255, 220, 120, 0.15);
+  color: #ffe0a0;
+  font-size: 0.78rem;
+}
+
+.flight-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1400;
+}
+
+.flight-layer .card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  margin: 0;
+  transform-origin: top left;
+  will-change: transform, opacity;
+  box-shadow: 0 18px 32px rgba(0, 0, 0, 0.42);
+}
+
+.status-line.your-turn {
+  border: 1px solid rgba(239, 224, 75, 0.5);
+  background: linear-gradient(180deg, rgba(84, 74, 20, 0.55), rgba(45, 40, 12, 0.55));
+  color: #ffe9a8;
+  font-weight: 700;
+  animation: durakTurnPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes durakTurnPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 224, 75, 0);
+  }
+  50% {
+    box-shadow: 0 0 16px 3px rgba(239, 224, 75, 0.2);
+  }
 }
 
 .status-line:empty,
@@ -630,6 +700,7 @@ select option {
 }
 
 .hand {
+  grid-area: hand;
   margin-top: 14px;
   display: flex;
   flex-wrap: nowrap;
@@ -638,6 +709,7 @@ select option {
   overflow-x: hidden;
   overflow-y: visible;
   padding: 12px 20px 4px;
+  min-height: 144px;
 }
 
 .card {
@@ -762,7 +834,7 @@ select option {
 }
 
 .card-btn.sel .card::after {
-  content: "вњ“";
+  content: "✓";
   position: absolute;
   top: 5px;
   right: 5px;
@@ -901,8 +973,7 @@ button:disabled {
   .center-cards {
     min-width: 0;
     width: 100%;
-    grid-template-columns: repeat(3, minmax(88px, 108px));
-    padding: 20px 20px 140px;
+    padding: 20px 12px 140px;
     top: 50%;
   }
 
@@ -936,18 +1007,24 @@ button:disabled {
   }
 
   .center-cards {
-    gap: 12px;
+    gap: 10px;
   }
 
   .table-pair {
-    width: 100px;
-    height: 144px;
+    width: 88px;
+    height: 126px;
   }
 
-  .table-pair .card.attack-card,
+  .table-pair .card.attack-card {
+    width: 60px;
+    height: 86px;
+  }
+
   .table-pair .card.defense-card {
-    width: 68px;
-    height: 98px;
+    width: 60px;
+    height: 86px;
+    left: 18px;
+    top: 24px;
   }
 
   .actions {

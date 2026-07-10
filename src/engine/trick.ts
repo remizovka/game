@@ -20,11 +20,13 @@ export function compareCards(
   const bIsTrump = isTrump(b, trumpSuit, ruleset);
 
   if (aIsTrump && bIsTrump) {
-    const aIsJack = isJack(a);
-    const bIsJack = isJack(b);
-    if (aIsJack || bIsJack) {
-      if (aIsJack && bIsJack) return jackStrength(a, ruleset) - jackStrength(b, ruleset);
-      return aIsJack ? 1 : -1;
+    if (ruleset.jacksAlwaysTrump) {
+      const aIsJack = isJack(a);
+      const bIsJack = isJack(b);
+      if (aIsJack || bIsJack) {
+        if (aIsJack && bIsJack) return jackStrength(a, ruleset) - jackStrength(b, ruleset);
+        return aIsJack ? 1 : -1;
+      }
     }
     const ar = rankStrength(cardRank(a), ruleset.deckSize);
     const br = rankStrength(cardRank(b), ruleset.deckSize);
@@ -33,8 +35,8 @@ export function compareCards(
 
   if (aIsTrump !== bIsTrump) return aIsTrump ? 1 : -1;
 
-  const aFollows = !isJack(a) && cardSuit(a) === leadSuit;
-  const bFollows = !isJack(b) && cardSuit(b) === leadSuit;
+  const aFollows = cardSuit(a) === leadSuit;
+  const bFollows = cardSuit(b) === leadSuit;
   if (aFollows && bFollows) {
     const ar = rankStrength(cardRank(a), ruleset.deckSize);
     const br = rankStrength(cardRank(b), ruleset.deckSize);

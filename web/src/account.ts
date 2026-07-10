@@ -1,4 +1,5 @@
 import { mountAuthBadge } from "./auth-badge";
+import { authFetchErrorMessage, resolveAuthApiBase } from "./auth-base";
 
 type MeResponse = {
   authenticated: boolean;
@@ -11,7 +12,7 @@ type MeResponse = {
   };
 };
 
-const API_BASE = (window as unknown as { AUTH_API_BASE?: string }).AUTH_API_BASE || "http://localhost:8787";
+const API_BASE = resolveAuthApiBase();
 mountAuthBadge();
 
 const authCard = document.querySelector("#authCard") as HTMLElement;
@@ -29,6 +30,9 @@ function setMessage(text: string, isError = false) {
 }
 
 async function api(path: string, method = "GET", body?: unknown) {
+  if (!API_BASE) {
+    throw new Error("Авторизация доступна только при локальном запуске (npm run auth:dev)");
+  }
   const res = await fetch(`${API_BASE}${path}`, {
     method,
     credentials: "include",
@@ -72,7 +76,7 @@ async function refreshMe() {
     const me = (await api("/api/auth/me")) as MeResponse;
     renderProfile(me);
   } catch (err) {
-    setMessage(err instanceof Error ? err.message : String(err), true);
+    setMessage(authFetchErrorMessage(err), true);
   }
 }
 
@@ -92,7 +96,7 @@ loginForm.addEventListener("submit", async e => {
     setMessage("");
     await refreshMe();
   } catch (err) {
-    setMessage(err instanceof Error ? err.message : String(err), true);
+    setMessage(authFetchErrorMessage(err), true);
   }
 });
 
@@ -109,7 +113,7 @@ registerForm.addEventListener("submit", async e => {
     setMessage("");
     await refreshMe();
   } catch (err) {
-    setMessage(err instanceof Error ? err.message : String(err), true);
+    setMessage(authFetchErrorMessage(err), true);
   }
 });
 
@@ -120,7 +124,7 @@ logoutBtn.addEventListener("click", async () => {
     profileCard.classList.add("hidden");
     switchTab("login");
   } catch (err) {
-    setMessage(err instanceof Error ? err.message : String(err), true);
+    setMessage(authFetchErrorMessage(err), true);
   }
 });
 
@@ -129,9 +133,22 @@ googleBtn.addEventListener("click", async () => {
     const cfg = await api("/api/auth/google/config");
     setMessage(cfg.enabled ? "Google OAuth готов к подключению" : "Google OAuth еще не настроен");
   } catch (err) {
-    setMessage(err instanceof Error ? err.message : String(err), true);
+    setMessage(authFetchErrorMessage(err), true);
   }
 });
 
 switchTab("login");
-refreshMe();
+if (API_BASE) {
+  refreshMe();
+} else {
+  const controls = Array.from(
+    document.querySelectorAll("#authCard button, #authCard input")
+  ) as (HTMLButtonElement | HTMLInputElement)[];
+  controls.forEach(el => {
+    el.disabled = true;
+  });
+  setMessage(
+    "Онлайн-версия работает без аккаунтов. Авторизация доступна при локальном запуске: npm run auth:dev",
+    true
+  );
+}

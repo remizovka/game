@@ -17,8 +17,9 @@
 
 body {
   margin: 0;
-  height: 100dvh;
-  overflow: hidden;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  overflow-y: auto;
   font-family: "Sora", sans-serif;
   color: var(--text);
   background:
@@ -51,7 +52,7 @@ body::before {
   z-index: 1;
   width: min(1320px, calc(100% - 28px));
   margin: 0 auto;
-  height: 100dvh;
+  min-height: 100dvh;
   padding: 10px 0;
   display: flex;
   flex-direction: column;
@@ -173,14 +174,14 @@ select option {
 }
 
 .table {
-  flex: 1;
-  min-height: 0;
+  /* Растет вместе с контентом: если стол не помещается в экран,
+     страница прокручивается, а панели не наезжают друг на друга. */
+  flex: 1 0 auto;
   padding: 12px;
   border-radius: 24px;
   display: grid;
   grid-template-rows: minmax(88px, auto) minmax(0, 1fr) minmax(138px, auto);
   gap: 10px;
-  overflow: hidden;
 }
 
 .opponents {
@@ -226,6 +227,10 @@ select option {
 }
 
 .opp-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
   font-size: 0.76rem;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -233,9 +238,34 @@ select option {
 }
 
 .opp-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
   font-size: 0.68rem;
   color: var(--muted);
   line-height: 1.3;
+}
+
+.penalty-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 208, 131, 0.4);
+  background: rgba(255, 208, 131, 0.12);
+  color: var(--amber);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.penalty-pill.danger {
+  border-color: rgba(255, 122, 92, 0.5);
+  background: rgba(255, 122, 92, 0.14);
+  color: #ff9d85;
 }
 
 .opp-backs {
@@ -243,11 +273,11 @@ select option {
   flex-wrap: nowrap;
   gap: 4px;
   overflow: hidden;
-  min-height: 38px;
+  min-height: 42px;
 }
 
 .last-move {
-  min-height: 38px;
+  min-height: 44px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -265,7 +295,8 @@ select option {
   display: flex;
   align-items: center;
   gap: 4px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow: hidden;
 }
 
 .last-move-more {
@@ -333,7 +364,8 @@ select option {
 }
 
 .center-cards {
-  min-height: 124px;
+  min-height: clamp(96px, 18dvh, 124px);
+  flex-shrink: 0;
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
@@ -372,8 +404,9 @@ select option {
 }
 
 .center-cards .card {
-  width: 74px;
-  height: 108px;
+  height: clamp(72px, 15dvh, 108px);
+  width: auto;
+  aspect-ratio: 60 / 88;
 }
 
 .opponents.dense {
@@ -510,6 +543,7 @@ select option {
   flex-wrap: nowrap;
   align-items: flex-end;
   justify-content: center;
+  gap: var(--hand-gap, 8px);
   overflow-x: auto;
   overflow-y: visible;
   padding-top: 18px;
@@ -586,8 +620,8 @@ select option {
 }
 
 .card.mini {
-  width: 34px;
-  height: 50px;
+  width: 28px;
+  height: 40px;
   border-radius: 6px;
   padding: 3px;
   box-shadow: 0 8px 14px rgba(0, 0, 0, 0.18);
@@ -642,6 +676,14 @@ select option {
   cursor: default;
   opacity: 0.82;
   filter: saturate(0.82);
+}
+
+.card-btn.can-beat .card {
+  outline: 2px solid rgba(130, 223, 255, 0.5);
+  outline-offset: -2px;
+  box-shadow:
+    0 16px 24px rgba(0, 0, 0, 0.26),
+    0 0 16px rgba(130, 223, 255, 0.28);
 }
 
 .card-btn.sel .card {
@@ -756,11 +798,6 @@ button:disabled {
   .center-cards {
     min-height: 108px;
   }
-
-  .center-cards .card {
-    width: 66px;
-    height: 96px;
-  }
 }
 
 @media (max-width: 780px) {
@@ -798,4 +835,21 @@ button:disabled {
     justify-content: flex-start;
     padding-bottom: 4px;
   }
+}
+
+.flight-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1400;
+}
+
+.flight-layer .card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  margin: 0;
+  transform-origin: top left;
+  will-change: transform, opacity;
+  box-shadow: 0 18px 32px rgba(0, 0, 0, 0.42);
 }

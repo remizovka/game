@@ -16,6 +16,14 @@
   type PlayerId,
 } from "@engine/index";
 import { mountAuthBadge } from "./auth-badge";
+import {
+  centeredIn,
+  flightsEnabled,
+  flyGhost,
+  flyGhostToElement,
+  rectOf,
+  type FlightRect,
+} from "./card-flight";
 
 const players: PlayerId[] = ["P0", "P1", "P2", "P3"];
 mountAuthBadge({ mode: "inline", beforeSelector: "#downloadLog", containerSelector: ".status" });
@@ -43,6 +51,18 @@ const NEXT_DEAL_DELAY_MS = 2000;
 const SIMULATION_DELAY_MS = 1000;
 const PAGE_BASE_URL = new URL(".", window.location.href);
 let matchOver = false;
+let pendingPlayFlight: { player: PlayerId; card: Card; from: FlightRect } | null = null;
+
+function runBelkaFlights(): void {
+  const ctx = pendingPlayFlight;
+  pendingPlayFlight = null;
+  if (!ctx || !flightsEnabled()) return;
+  const destEl = document.querySelector<HTMLElement>(
+    `.trick-slot[data-slot="${ctx.player}"] .card[data-card="${ctx.card}"]`
+  );
+  if (!destEl) return;
+  flyGhostToElement(renderCard(ctx.card), ctx.from, destEl, 0);
+}
 let pendingFinalize = false;
 let runTimer: number | null = null;
 let simulationMode = false;
@@ -54,7 +74,7 @@ type LogEvent = (
   | { type: "deal_start"; at: number; deal: number; dealer: PlayerId; leader: PlayerId; trump: string; trumpOwner: PlayerId | null; hands: Record<PlayerId, Card[]> }
   | { type: "play"; at: number; deal: number; trickIndex: number; player: PlayerId; card: Card }
   | { type: "trick_end"; at: number; deal: number; trickIndex: number; winner: PlayerId; points: number }
-  | { type: "deal_end"; at: number; deal: number; pointsA: number; pointsB: number; eyesA: number; eyesB: number; eyesDelta: number; reasons: string[]; eggsCarry: number }
+  | { type: "deal_end"; at: number; deal: number; pointsA: number; pointsB: number; winnerTeam?: "A" | "B"; eyesA: number; eyesB: number; eyesDelta: number; reasons: string[]; eggsCarry: number }
   | { type: "match_end"; at: number; winner: "A" | "B"; score: { A: number; B: number } }
 ) & { match?: number };
 
@@ -67,6 +87,7 @@ const leaderEl = document.querySelector("#leader") as HTMLElement;
 const lastWinnerEl = document.querySelector("#lastWinner") as HTMLElement;
 const matchEl = document.querySelector("#matchScore") as HTMLElement | null;
 const bannerEl = document.querySelector("#banner") as HTMLElement | null;
+const turnHintEl = document.querySelector("#turnHint") as HTMLElement | null;
 const trumpMarks = {
   P0: document.querySelector('[data-trump-mark="P0"]') as HTMLElement,
   P1: document.querySelector('[data-trump-mark="P1"]') as HTMLElement,
@@ -143,6 +164,14 @@ function playerName(player: PlayerId | null | undefined): string {
   return playerUiNames[player] ?? player;
 }
 
+function eyesWord(count: number): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return "глаз";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "глаза";
+  return "глаз";
+}
+
 function suitColor(card: Card): "red" | "black" {
   const suit = card.slice(card.length - 1);
   return suit === "H" || suit === "D" ? "red" : "black";
@@ -182,18 +211,10 @@ function verboseBelkaCardAssetName(code: string): string | null {
 
 function belkaCardAssetCandidates(code: string): string[] {
   const verbose = verboseBelkaCardAssetName(code);
-  const roots = [
-    new URL("cards", PAGE_BASE_URL).toString().replace(/\/$/, ""),
-    new URL("assets/cards", PAGE_BASE_URL).toString().replace(/\/$/, ""),
-  ];
-  const names = [code, ...(verbose ? [verbose] : [])];
-  const bases = roots.flatMap(root => names.map(name => `${root}/${name}`));
+  if (!verbose) return [];
+  const root = new URL("cards", PAGE_BASE_URL).toString().replace(/\/$/, "");
   const v = "cards-v2";
-  return [
-    ...bases.map(base => `${base}.svg?v=${v}`),
-    ...bases.map(base => `${base}.png?v=${v}`),
-    ...bases.map(base => `${base}.webp?v=${v}`),
-  ];
+  return [`${root}/${verbose}.svg?v=${v}`, `${root}/${verbose}.png?v=${v}`];
 }
 
 function attachBelkaCardImage(el: HTMLElement, code: string, alt: string): void {
@@ -212,7 +233,6 @@ function attachBelkaCardImage(el: HTMLElement, code: string, alt: string): void 
     img.src = candidates[idx];
     idx += 1;
   };
-  el.classList.add("has-image");
   img.addEventListener("load", () => {
     el.classList.add("has-image");
     resolvedBelkaCardImageSrc.set(code, img.currentSrc || img.src);
@@ -228,6 +248,7 @@ function attachBelkaCardImage(el: HTMLElement, code: string, alt: string): void 
   });
   el.append(img);
   if (typeof resolved === "string") {
+    el.classList.add("has-image");
     img.src = resolved;
   } else {
     tryNext();
@@ -241,6 +262,7 @@ function renderCard(card: Card, small = false, faceDown = false): HTMLElement {
   attachBelkaCardImage(el, faceDown ? "BACK" : card, faceDown ? "Рубашка карты" : `Карта ${card}`);
   if (!faceDown) {
     el.setAttribute("data-suit", suitSymbol(card));
+    el.dataset.card = card;
   }
   if (faceDown) return el;
 
@@ -262,7 +284,7 @@ function renderCard(card: Card, small = false, faceDown = false): HTMLElement {
 function eyesAssetUrl(eyes: number, color: "black" | "red"): string {
   const suitName = color === "black" ? "крести" : "черви";
   const fileName = `${eyes} глаз ${suitName}.svg`;
-  return new URL(`cards/${encodeURIComponent(fileName)}`, PAGE_BASE_URL).toString();
+  return `${new URL(`cards/${encodeURIComponent(fileName)}`, PAGE_BASE_URL).toString()}?v=eyes-2`;
 }
 
 function renderHand(player: PlayerId, hand: Card[]) {
@@ -285,6 +307,7 @@ function renderHand(player: PlayerId, hand: Card[]) {
         if (state.leader !== player) return;
         const allowed = legalMoves(hand, state.trick, state.trump.suit, state.ruleset);
         if (!allowed.includes(card)) return;
+        pendingPlayFlight = { player, card, from: rectOf(cardEl) };
         const result = applyMove(state, player, card);
         logEvent({
           type: "play",
@@ -335,8 +358,8 @@ function renderTrick(trick: { player: PlayerId; card: Card }[]) {
 
 function nextClockwise(player: PlayerId): PlayerId {
   // Visual clockwise order on the table:
-  // bottom (P0) -> left (P3) -> top (P2) -> right (P1) -> bottom.
-  const visualClockwise: PlayerId[] = ["P0", "P3", "P2", "P1"];
+  // bottom (P0) -> left (P1) -> top (P2) -> right (P3) -> bottom.
+  const visualClockwise: PlayerId[] = ["P0", "P1", "P2", "P3"];
   const idx = visualClockwise.indexOf(player);
   return visualClockwise[(idx + 1) % visualClockwise.length];
 }
@@ -359,7 +382,9 @@ function getOrCreateEyesLayer(): HTMLElement | null {
   return layer;
 }
 
-function getEyesBoardPosition(player: PlayerId): { left: number; top: number } | null {
+type EyesBoardPosition = { left?: number; right?: number; top: number };
+
+function getEyesBoardPosition(player: PlayerId): EyesBoardPosition | null {
   const tableEl = document.querySelector(".table") as HTMLElement | null;
   const playerEl = document.querySelector(`#player-${player}`) as HTMLElement | null;
   const handEl = playerEl?.querySelector(`[data-player="${player}"]`) as HTMLElement | null;
@@ -371,19 +396,21 @@ function getEyesBoardPosition(player: PlayerId): { left: number; top: number } |
   const handRect = handEl.getBoundingClientRect();
   const firstCardRect = handCards[0]?.getBoundingClientRect() ?? handRect;
   const lastCardRect = handCards[handCards.length - 1]?.getBoundingClientRect() ?? handRect;
-  const boardWidth = 112;
-  const boardHeight = 112;
+  const boardWidth = 104;
+  const boardHeight = 126;
 
   switch (player) {
     case "P0":
+      // Якорим по правому краю: зазор до первой карты руки не зависит
+      // от фактической ширины счетчика.
       return {
-        left: firstCardRect.left - tableRect.left - boardWidth - 18,
+        right: tableRect.width - (firstCardRect.left - tableRect.left) + 28,
         top: firstCardRect.top - tableRect.top + (firstCardRect.height - boardHeight) / 2,
       };
     case "P1":
       return {
-        left: playerRect.left - tableRect.left + playerRect.width - boardWidth - 18,
-        top: handRect.top - tableRect.top + handRect.height + 12,
+        left: firstCardRect.left - tableRect.left + 6,
+        top: firstCardRect.top - tableRect.top - boardHeight - 28,
       };
     case "P2":
       return {
@@ -392,13 +419,41 @@ function getEyesBoardPosition(player: PlayerId): { left: number; top: number } |
       };
     case "P3":
       return {
-        left: firstCardRect.left - tableRect.left + 6,
-        top: firstCardRect.top - tableRect.top - boardHeight - 28,
+        left: playerRect.left - tableRect.left + playerRect.width - boardWidth - 18,
+        top: handRect.top - tableRect.top + handRect.height + 12,
       };
     default:
       return null;
   }
 }
+
+// Соотношение сторон каждой картинки счетчика и доля высоты, которую в ней
+// занимает открытая карта. Нужны, чтобы карта на картинке была ровно того же
+// размера, что и игровые карты (--card-human-height), независимо от кадрирования.
+const EYES_ASSET_GEOMETRY: Record<string, { aspect: number; hFrac: number }> = {
+  "1-black": { aspect: 0.9063, hFrac: 0.878 },
+  "2-black": { aspect: 0.5359, hFrac: 0.7995 },
+  "3-black": { aspect: 0.9631, hFrac: 0.9992 },
+  "4-black": { aspect: 0.4252, hFrac: 0.6343 },
+  "5-black": { aspect: 0.6102, hFrac: 0.6185 },
+  "6-black": { aspect: 0.6873, hFrac: 0.9406 },
+  "7-black": { aspect: 0.8973, hFrac: 0.8485 },
+  "8-black": { aspect: 0.5015, hFrac: 0.7481 },
+  "9-black": { aspect: 0.9692, hFrac: 0.9992 },
+  "10-black": { aspect: 0.4074, hFrac: 0.6078 },
+  "11-black": { aspect: 0.6152, hFrac: 0.6126 },
+  "1-red": { aspect: 0.9063, hFrac: 0.878 },
+  "2-red": { aspect: 0.5291, hFrac: 0.7893 },
+  "3-red": { aspect: 0.9509, hFrac: 0.9992 },
+  "4-red": { aspect: 0.4275, hFrac: 0.6378 },
+  "5-red": { aspect: 0.6165, hFrac: 0.6201 },
+  "6-red": { aspect: 0.7017, hFrac: 0.9469 },
+  "7-red": { aspect: 0.8973, hFrac: 0.8485 },
+  "8-red": { aspect: 0.5033, hFrac: 0.7493 },
+  "9-red": { aspect: 0.9582, hFrac: 0.9991 },
+  "10-red": { aspect: 0.4105, hFrac: 0.6112 },
+  "11-red": { aspect: 0.5958, hFrac: 0.607 },
+};
 
 function renderEyesStack(cards: [Card, Card], eyes: number, color: "black" | "red"): HTMLElement {
   type EyeCardView = {
@@ -448,6 +503,12 @@ function renderEyesStack(cards: [Card, Card], eyes: number, color: "black" | "re
   if (canUseEyesCounterAsset(eyes, color)) {
     const frame = document.createElement("div");
     frame.className = "eyes-counter-frame";
+    const geo = EYES_ASSET_GEOMETRY[`${eyes}-${color}`];
+    if (geo) {
+      frame.style.height = `calc(var(--card-human-height) / ${geo.hFrac})`;
+      frame.style.width = "auto";
+      frame.style.aspectRatio = String(geo.aspect);
+    }
     const img = document.createElement("img");
     img.className = "eyes-counter-image";
     img.alt = `${eyes} глаз ${color === "black" ? "крести" : "черви"}`;
@@ -520,18 +581,22 @@ function renderEyesBoards() {
   const heartPosition = getEyesBoardPosition(heartAnchor);
   if (!clubPosition || !heartPosition) return;
 
+  const applyEyesPosition = (el: HTMLElement, pos: EyesBoardPosition) => {
+    if (pos.left !== undefined) el.style.left = `${pos.left}px`;
+    if (pos.right !== undefined) el.style.right = `${pos.right}px`;
+    el.style.top = `${pos.top}px`;
+  };
+
   const clubBoard = document.createElement("div");
   clubBoard.className = `eyes-board eyes-black eyes-team-${clubTeam.toLowerCase()}`;
   clubBoard.append(renderEyesStack(["6C", "6S"], clubEyes, "black"));
-  clubBoard.style.left = `${clubPosition.left}px`;
-  clubBoard.style.top = `${clubPosition.top}px`;
+  applyEyesPosition(clubBoard, clubPosition);
   layer.append(clubBoard);
 
   const heartBoard = document.createElement("div");
   heartBoard.className = `eyes-board eyes-red eyes-team-${heartTeam.toLowerCase()}`;
   heartBoard.append(renderEyesStack(["6H", "6D"], heartEyes, "red"));
-  heartBoard.style.left = `${heartPosition.left}px`;
-  heartBoard.style.top = `${heartPosition.top}px`;
+  applyEyesPosition(heartBoard, heartPosition);
   layer.append(heartBoard);
 }
 
@@ -569,6 +634,16 @@ function render() {
     panel.classList.toggle("is-trump-owner", currentHolderOfJC === player);
   });
 
+  if (turnHintEl) {
+    const humanTurn =
+      currentState.leader === "P0" &&
+      canHumanPlay() &&
+      !trickHold &&
+      !matchOver &&
+      currentState.hands.P0.length > 0;
+    turnHintEl.classList.toggle("show", humanTurn);
+  }
+
   renderHand("P0", currentState.hands.P0);
   renderHand("P1", currentState.hands.P1);
   renderHand("P2", currentState.hands.P2);
@@ -577,6 +652,7 @@ function render() {
   renderTrick(shownTrick);
   renderDebug();
   updateTrumpMarks();
+  runBelkaFlights();
   runBots();
 }
 
@@ -688,7 +764,11 @@ function startNewDeal() {
   runBots();
 }
 
-function selectBotMove(s: GameState, player: PlayerId): Card {
+function selectBotMove(
+  s: GameState,
+  player: PlayerId,
+  holderOfJC: PlayerId | null = currentHolderOfJC
+): Card {
   const hand = s.hands[player];
   const legal = legalMoves(hand, s.trick, s.trump.suit, s.ruleset);
   if (legal.length === 0) throw new Error("No legal moves");
@@ -717,9 +797,8 @@ function selectBotMove(s: GameState, player: PlayerId): Card {
   const myTeam = teams.A.includes(player) ? "A" : "B";
   const myTeamPoints = s.dealPoints[myTeam];
   const oppPoints = myTeam === "A" ? s.dealPoints.B : s.dealPoints.A;
-  const jcTeam =
-    currentHolderOfJC && teams.A.includes(currentHolderOfJC) ? "A" : "B";
-  const foreignTrump = currentHolderOfJC !== null && jcTeam !== myTeam;
+  const jcTeam = holderOfJC && teams.A.includes(holderOfJC) ? "A" : "B";
+  const foreignTrump = holderOfJC !== null && jcTeam !== myTeam;
   const tricksPlayed = s.history.length;
   const remainingTricks = 8 - tricksPlayed;
   const endgame = remainingTricks <= 2;
@@ -795,8 +874,9 @@ function selectBotMove(s: GameState, player: PlayerId): Card {
     ) ?? tens.find(t => !cutInfo.cutSuits.has(cardSuit(t)) && !oppCut.has(cardSuit(t)));
     if (safeTen2 && !foreignTrump) return safeTen2;
 
-    // If opponent has cut a suit, try to lead that suit to burn trumps.
-    const oppCutLead = nonTrump.filter(c => oppCut.has(cardSuit(c)));
+    // If opponent has cut a suit, try to lead that suit to burn trumps —
+    // but only with cheap cards: гнать десятку под известную резку нельзя.
+    const oppCutLead = nonTrump.filter(c => oppCut.has(cardSuit(c)) && cardPoints(c) <= 4);
     if (!inDefenseMode && oppCutLead.length > 0) {
       return oppCutLead.sort((a, b) => cardPoints(a) - cardPoints(b))[0];
     }
@@ -828,15 +908,117 @@ function selectBotMove(s: GameState, player: PlayerId): Card {
   });
 
   if (partnerWinning) {
+    const seen = new Set<Card>([
+      ...s.history.flatMap(h => h.trick.map(t => t.card)),
+      ...s.trick.map(t => t.card),
+      ...hand,
+    ]);
+    const suitHasUnseenHigher = (card: Card): boolean =>
+      ["A", "10", "K", "Q", "9", "8", "7", "6"].some(rank => {
+        const candidate = `${rank}${cardSuit(card)}` as Card;
+        return (
+          !seen.has(candidate) &&
+          compareCards(candidate, card, cardSuit(card), s.trump.suit, s.ruleset) > 0
+        );
+      });
+    const partnerCard = currentWinner!.card;
+    const partnerSecure =
+      isJack(partnerCard) ||
+      cardSuit(partnerCard) === s.trump.suit ||
+      !suitHasUnseenHigher(partnerCard);
+    const lastToAct = s.trick.length === 3;
+
+    // Страховка: перебой партнера могут перекрыть (например K при живой 10),
+    // а у нас мастер масти (туз). Забираем сами, чтобы очки не ушли соперникам.
+    if (!partnerSecure && !lastToAct && leadSuit && trickPoints >= 4) {
+      const insurance = legal
+        .filter(
+          c =>
+            !isJack(c) &&
+            cardSuit(c) === leadSuit &&
+            !suitHasUnseenHigher(c) &&
+            compareCards(c, partnerCard, leadSuit, s.trump.suit, s.ruleset) > 0
+        )
+        .sort((a, b) => compareCards(a, b, leadSuit, s.trump.suit, s.ruleset))[0];
+      if (insurance) return insurance;
+    }
+
     const nonOvertake = legal.filter(c => {
       const lead = leadSuit ?? cardSuit(c);
       return compareCards(c, currentWinner!.card, lead, s.trump.suit, s.ruleset) <= 0;
     });
     if (nonOvertake.length > 0) {
-      // "Pour" points to partner when safe, but avoid throwing A if partner already wins.
+      const plainCards = nonOvertake.filter(c => !isJack(c) && cardSuit(c) !== s.trump.suit);
+
+      const alreadyPlayed = new Set(s.trick.map(t => t.player));
+      const opponentsTeam = myTeam === "A" ? teams.B : teams.A;
+      const cutterBehind = leadSuit
+        ? opponentsTeam.some(
+            p => p !== player && !alreadyPlayed.has(p) && cutInfo.cutBy[p]?.has(leadSuit)
+          )
+        : false;
+
+      // Последний ход при выигрывающем партнере: взятка гарантированно наша.
+      // Порядок налива: десятка (сама взятку не приведет — ее съест туз),
+      // затем обреченные очковые, затем туз, затем прочие очковые.
+      if (lastToAct) {
+        const played = new Set<Card>([
+          ...s.history.flatMap(h => h.trick.map(t => t.card)),
+          ...s.trick.map(t => t.card),
+        ]);
+        const pourTen = plainCards.find(
+          c => cardRank(c) === "10" && !played.has(`A${cardSuit(c)}` as Card)
+        );
+        if (pourTen) return pourTen;
+
+        const doomedValue = plainCards
+          .filter(c => cardPoints(c) > 0 && cardRank(c) !== "A" && suitHasUnseenHigher(c))
+          .sort((a, b) => cardPoints(b) - cardPoints(a))[0];
+        if (doomedValue) return doomedValue;
+
+        const pourAce = plainCards.find(c => cardRank(c) === "A");
+        if (pourAce) return pourAce;
+
+        const bestPour = [...plainCards].sort((a, b) => cardPoints(b) - cardPoints(a))[0];
+        if (bestPour && cardPoints(bestPour) > 0) return bestPour;
+      }
+
+      // 1) Наливаем партнеру очки картой, которая свою взятку уже не возьмет:
+      //    очковая карта масти лида (масть все равно уходит) или карта,
+      //    над которой еще гуляют старшие. Будущих мастеров бережем.
+      if (partnerSecure && !cutterBehind) {
+        const doomedPoints = plainCards
+          .filter(
+            c =>
+              cardPoints(c) > 0 &&
+              cardRank(c) !== "A" &&
+              (cardSuit(c) === leadSuit || suitHasUnseenHigher(c))
+          )
+          .sort((a, b) => cardPoints(b) - cardPoints(a));
+        if (doomedPoints.length > 0) return doomedPoints[0];
+      }
+
+      // 2) Очков на налив нет — освобождаем самую короткую простую масть,
+      //    чтобы в будущем резать её козырем.
+      const zeroDiscards = plainCards.filter(c => cardPoints(c) === 0);
+      if (zeroDiscards.length > 0) {
+        const suitLen = (suit: string) =>
+          hand.filter(h => !isJack(h) && cardSuit(h) === suit).length;
+        return zeroDiscards.sort((a, b) => {
+          const bySuitLen = suitLen(cardSuit(a)) - suitLen(cardSuit(b));
+          if (bySuitLen !== 0) return bySuitLen;
+          return (
+            rankStrength(cardRank(a), s.ruleset.deckSize) -
+            rankStrength(cardRank(b), s.ruleset.deckSize)
+          );
+        })[0];
+      }
+
+      // 3) Остались только ценные карты — отдаем минимально дорогую,
+      //    тузы в последнюю очередь. Козырем взятку партнера не перебиваем.
       const avoidAces = nonOvertake.filter(c => cardRank(c) !== "A");
       const pool = avoidAces.length > 0 ? avoidAces : nonOvertake;
-      return [...pool].sort((a, b) => cardPoints(b) - cardPoints(a))[0];
+      return [...pool].sort((a, b) => cardPoints(a) - cardPoints(b))[0];
     }
     // If we must overtake partner, do it with minimal cost.
     return sortedByPointsAsc[0];
@@ -870,10 +1052,57 @@ function selectBotMove(s: GameState, player: PlayerId): Card {
     }
 
     // Choose the cheapest winning card to save power.
-    return pool.sort((a, b) => {
+    const cheapestWin = pool.sort((a, b) => {
       const lead = leadSuit ?? cardSuit(a);
       return compareCards(a, b, lead, s.trump.suit, s.ruleset);
     })[0];
+
+    // Не последний ход во взятке и перебиваем простой мастью.
+    if (
+      s.trick.length < 3 &&
+      leadSuit &&
+      !isJack(cheapestWin) &&
+      cardSuit(cheapestWin) === leadSuit
+    ) {
+      // Сзади сидит соперник, который уже показал, что режет эту масть
+      // козырем, — не вкладываем ни туза, ни короля, скидываем мелочь.
+      const alreadyPlayed = new Set(s.trick.map(t => t.player));
+      const opponents = myTeam === "A" ? teams.B : teams.A;
+      const cutterBehind = opponents.some(
+        p => p !== player && !alreadyPlayed.has(p) && cutInfo.cutBy[p]?.has(leadSuit)
+      );
+      if (cutterBehind) {
+        return sortedByPointsAsc[0];
+      }
+
+      // Масть выходит за один круг: придержанный мастер (обычно туз) на
+      // втором круге почти всегда попадает под козыря. Поэтому если наш
+      // "дешевый" перебой могут перекрыть оставшиеся старшие карты масти,
+      // а мастер у нас, — бьем мастером сразу.
+      const seen = new Set<Card>([
+        ...s.history.flatMap(h => h.trick.map(t => t.card)),
+        ...s.trick.map(t => t.card),
+        ...hand,
+      ]);
+      const outstandingHigher = (card: Card): boolean =>
+        ["A", "10", "K", "Q", "9", "8", "7", "6"].some(rank => {
+          const candidate = `${rank}${leadSuit}` as Card;
+          return (
+            !seen.has(candidate) &&
+            compareCards(candidate, card, leadSuit, s.trump.suit, s.ruleset) > 0
+          );
+        });
+      if (outstandingHigher(cheapestWin)) {
+        const secureWin = pool
+          .filter(c => !isJack(c) && cardSuit(c) === leadSuit && !outstandingHigher(c))
+          .sort((a, b) => compareCards(a, b, leadSuit, s.trump.suit, s.ruleset))[0];
+        if (secureWin) {
+          return secureWin;
+        }
+      }
+    }
+
+    return cheapestWin;
   }
 
   // If we cannot win: dump low points, unless in rescue mode and trick has points.
@@ -988,6 +1217,7 @@ function botStep() {
     card = legal[0];
   }
 
+  pendingPlayFlight = { player: leader, card, from: rectOf(playerPanels[leader]) };
   const result = applyMove(state, leader, card);
   logEvent({
     type: "play",
@@ -1031,16 +1261,18 @@ function finalizeDealIfEnded() {
 
   const pointsA = state.dealPoints.A;
   const pointsB = state.dealPoints.B;
-  const dealScoreText = `${pointsA}:${pointsB}`;
   const winnerTeam = pointsA > pointsB ? "A" : "B";
-  const loserTeam = winnerTeam === "A" ? "B" : "A";
   const winnerPoints = Math.max(pointsA, pointsB);
   const loserPoints = Math.min(pointsA, pointsB);
+  // Подписи «вы/соперники» делают счёт однозначным: 62 — у победителя.
+  const dealResultText =
+    winnerTeam === "A"
+      ? `Ваша команда выиграла раздачу: у вас ${winnerPoints}, у соперников ${loserPoints}`
+      : `Соперники выиграли раздачу: у них ${winnerPoints}, у вас ${loserPoints}`;
 
   if (pointsA === 60 && pointsB === 60) {
     state = { ...state, eggsCarry: 4 };
-    showBanner(`Раздача: ${dealScoreText}. Жумыртка, следующая на 4 глаза.`);
-    // showBanner("Раздача закончена: жумыртка (60:60). Следующая в очко на 4 глаза.");
+    showBanner("Жумыртка 60:60 — следующая раздача на 4 глаза.");
     lastDealLeader = state.history[state.history.length - 1]?.winner ?? null;
     prevHolderOfJC = currentHolderOfJC;
     if (!suitAssignment && prevHolderOfJC) {
@@ -1111,6 +1343,7 @@ function finalizeDealIfEnded() {
     deal: dealIndex,
     pointsA,
     pointsB,
+    winnerTeam,
     eyesA: state.score.gameEyesA,
     eyesB: state.score.gameEyesB,
     eyesDelta: eyes,
@@ -1121,7 +1354,13 @@ function finalizeDealIfEnded() {
   if (state.score.gameEyesA >= 12 || state.score.gameEyesB >= 12) {
     matchOver = true;
     const winner = state.score.gameEyesA >= 12 ? "A" : "B";
-    showBanner(`Победила команда ${winner}.`);
+    const matchText =
+      winner === "A"
+        ? "Ваша команда победила в матче!"
+        : "Матч выиграли соперники.";
+    showBanner(
+      `${dealResultText}. ${matchText} Глаза: ${state.score.gameEyesA}:${state.score.gameEyesB}.`
+    );
     logEvent({
       type: "match_end",
       at: Date.now(),
@@ -1132,8 +1371,7 @@ function finalizeDealIfEnded() {
     return;
   }
 
-  // showBanner("Раздача закончена: следующая начнется через 4 сек.");
-  showBanner(`Раздача: ${dealScoreText}.`);
+  showBanner(`${dealResultText} (+${eyes} ${eyesWord(eyes)}).`);
   scheduleNextDeal();
 }
 
@@ -1171,28 +1409,33 @@ function holdTrickThenContinue() {
   trickHold = true;
   if (holdTimer !== null) window.clearTimeout(holdTimer);
   holdTimer = window.setTimeout(() => {
+    // Снимаем позиции карт взятки до очистки, чтобы отправить их к победителю.
+    const sweep = Array.from(document.querySelectorAll<HTMLElement>(".trick-slot .card"))
+      .map(el => ({ card: el.dataset.card as Card | undefined, rect: rectOf(el) }))
+      .filter((item): item is { card: Card; rect: FlightRect } => Boolean(item.card));
+    const sweepWinner = state?.history[state.history.length - 1]?.winner ?? null;
+
     trickHold = false;
     shownTrick = [];
     render();
+
+    if (sweepWinner && sweep.length > 0 && flightsEnabled()) {
+      const destZone = rectOf(playerPanels[sweepWinner]);
+      sweep.forEach((item, index) => {
+        flyGhost({
+          ghost: renderCard(item.card),
+          from: item.rect,
+          to: centeredIn(destZone, item.rect),
+          delay: index * 40,
+          fade: true,
+        });
+      });
+    }
+
     if (pendingFinalize) finalizeDealIfEnded();
     pendingFinalize = false;
     maybeAdvanceBots();
   }, getTrickHoldMs());
-}
-
-function scheduleBotMove() {
-  if (botTimer !== null) return;
-  botTimer = window.setTimeout(() => {
-    botTimer = null;
-    if (!state || trickHold) return;
-    try {
-      botStep();
-      render();
-      maybeAdvanceBots();
-    } catch (err) {
-      handleBotError(err, "schedule");
-    }
-  }, getBotDelayMs());
 }
 
 function clearTimers() {
@@ -1254,7 +1497,7 @@ function skipEmptyLeader() {
   let safety = 0;
   while (state.hands[state.leader].length === 0 && safety < players.length) {
     const idx = players.indexOf(state.leader);
-    const next = players[(idx - 1 + players.length) % players.length];
+    const next = players[(idx + 1) % players.length];
     state = { ...state, leader: next };
     safety += 1;
   }
@@ -1271,6 +1514,8 @@ function showBanner(text: string) {
   }
 }
 
+const BELKA_LOG_STORAGE_KEY = "belka_last_log_jsonl";
+
 function logEvent(evt: LogEvent) {
   if (matchLog.length === 0) {
     matchLog.push({
@@ -1280,6 +1525,11 @@ function logEvent(evt: LogEvent) {
     });
   }
   matchLog.push(evt);
+  try {
+    localStorage.setItem(BELKA_LOG_STORAGE_KEY, matchLog.map(e => JSON.stringify(e)).join("\n"));
+  } catch {
+    // Ignore storage errors.
+  }
 }
 
 function downloadLogData(events: LogEvent[], filenamePrefix: string) {
@@ -1316,6 +1566,24 @@ function downloadLogData(events: LogEvent[], filenamePrefix: string) {
 }
 
 function downloadLog() {
+  if (matchLog.length > 0) {
+    downloadLogData(matchLog, "belka-log");
+    return;
+  }
+  // После перезагрузки страницы текущий лог пуст — отдаем сохраненный.
+  try {
+    const stored = localStorage.getItem(BELKA_LOG_STORAGE_KEY);
+    if (stored) {
+      const events = stored
+        .split("\n")
+        .filter(Boolean)
+        .map(line => JSON.parse(line) as LogEvent);
+      downloadLogData(events, "belka-log");
+      return;
+    }
+  } catch {
+    // Ignore storage errors.
+  }
   downloadLogData(matchLog, "belka-log");
 }
 
@@ -1390,7 +1658,7 @@ function simulateFastMatches(matchCount: number): LogEvent[] {
         if (legal.length === 0) {
           throw new Error(`No legal moves for ${player}`);
         }
-        let card = selectBotMove(state, player);
+        let card = selectBotMove(state, player, currentHolderOfJC);
         if (!legal.includes(card)) {
           card = legal[0];
         }
@@ -1575,6 +1843,7 @@ if (restartBtn) {
     lastDealLeader = null;
     matchLog = [];
     currentTrickIndex = 0;
+    state = null;
     if (bannerEl) {
       bannerEl.textContent = "";
       bannerEl.classList.remove("active");

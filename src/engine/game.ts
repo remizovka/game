@@ -7,7 +7,7 @@ import { trickPoints } from "./score";
 function nextPlayer(current: PlayerId, playersInOrder: PlayerId[]): PlayerId {
   const idx = playersInOrder.indexOf(current);
   if (idx === -1) throw new Error(`Player not in order: ${current}`);
-  return playersInOrder[(idx - 1 + playersInOrder.length) % playersInOrder.length];
+  return playersInOrder[(idx + 1) % playersInOrder.length];
 }
 
 export interface ApplyMoveResult {
@@ -21,6 +21,9 @@ export function applyMove(
   player: PlayerId,
   card: Card
 ): ApplyMoveResult {
+  if (state.leader !== player) {
+    throw new Error(`Not ${player}'s turn: expected ${state.leader}`);
+  }
   const hand = state.hands[player] ?? [];
   if (!hand.includes(card)) {
     throw new Error(`Card ${card} not in hand of ${player}`);

@@ -3,13 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "type": "commonjs",
+  "engines": {
+    "node": ">=21"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node --test \"dist/tests/*.test.js\"",
     "demo": "npm run build && node dist/src/demo.js",
     "dev": "vite",
     "auth:dev": "node server/auth-server.js",
-    "build:web": "vite build",
+    "typecheck:web": "tsc -p web/tsconfig.json",
+    "build:web": "npm run typecheck:web && vite build",
     "preview": "vite preview"
   },
   "devDependencies": {

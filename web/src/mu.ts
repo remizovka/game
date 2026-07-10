@@ -8,6 +8,14 @@
   type MuGameState,
 } from "@engine/index";
 import { mountAuthBadge } from "./auth-badge";
+import {
+  centeredIn,
+  flightsEnabled,
+  flyGhost,
+  flyGhostToElement,
+  rectOf,
+  type FlightRect,
+} from "./card-flight";
 
 mountAuthBadge({ mode: "inline", beforeSelector: "#downloadLogBtn", containerSelector: ".setup" });
 
@@ -45,6 +53,56 @@ let lastActionByPlayer: Record<string, { action: "play" | "pass" | "announce_one
 let lastHandRenderKey = "";
 const resolvedCardImageSrc = new Map<string, string | null>();
 let displayedTablePlay: DisplayedTablePlay = null;
+
+type MuFlightContext = {
+  cards: MuCard[];
+  cardRects: Map<MuCard, FlightRect>;
+  sourceRect: FlightRect | null;
+};
+
+let pendingFlight: MuFlightContext | null = null;
+
+function captureMuFlight(playerId: string, cards: MuCard[]): MuFlightContext {
+  const cardRects = new Map<MuCard, FlightRect>();
+  let sourceRect: FlightRect | null = null;
+  if (playerId === HUMAN_ID) {
+    handEl.querySelectorAll<HTMLElement>(".card-btn").forEach(btn => {
+      const code = btn.dataset.card as MuCard | undefined;
+      if (code) cardRects.set(code, rectOf(btn));
+    });
+    sourceRect = rectOf(handEl);
+  } else {
+    const opp = opponentsEl.querySelector<HTMLElement>(`[data-player-id="${playerId}"]`);
+    if (opp) sourceRect = rectOf(opp);
+  }
+  return { cards: [...cards], cardRects, sourceRect };
+}
+
+function runMuFlights(): void {
+  const ctx = pendingFlight;
+  pendingFlight = null;
+  if (!ctx || !flightsEnabled()) return;
+
+  const destEls = Array.from(centerCardsEl.querySelectorAll<HTMLElement>(".card"));
+  const centerZone = rectOf(centerCardsEl);
+  ctx.cards.forEach((card, index) => {
+    const from = ctx.cardRects.get(card) ?? ctx.sourceRect;
+    if (!from) return;
+    const destEl = destEls.find(el => el.dataset.card === card);
+    if (destEl) {
+      flyGhostToElement(renderFaceCard(card), from, destEl, index * 60);
+    } else {
+      // Ход закрыл раунд — стол уже очищен, карты растворяются в центре.
+      flyGhost({
+        ghost: renderFaceCard(card),
+        from,
+        to: centeredIn(centerZone, from),
+        delay: index * 60,
+        fade: true,
+      });
+    }
+  });
+}
 
 type MuLogEvent =
   | { type: "match_start"; at: number; players: string[]; dealerId: string }
@@ -97,18 +155,10 @@ function isRed(card: MuCard): boolean {
 
 function cardAssetCandidates(code: string): string[] {
   const verbose = verboseCardAssetName(code);
-  const roots = [
-    new URL("cards", PAGE_BASE_URL).toString().replace(/\/$/, ""),
-    new URL("assets/cards", PAGE_BASE_URL).toString().replace(/\/$/, ""),
-  ];
-  const names = [code, ...(verbose ? [verbose] : [])];
-  const bases = roots.flatMap(root => names.map(name => `${root}/${name}`));
+  if (!verbose) return [];
+  const root = new URL("cards", PAGE_BASE_URL).toString().replace(/\/$/, "");
   const v = "cards-v2";
-  return [
-    ...bases.map(base => `${base}.svg?v=${v}`),
-    ...bases.map(base => `${base}.png?v=${v}`),
-    ...bases.map(base => `${base}.webp?v=${v}`),
-  ];
+  return [`${root}/${verbose}.svg?v=${v}`, `${root}/${verbose}.png?v=${v}`];
 }
 
 function verboseCardAssetName(code: string): string | null {
@@ -163,7 +213,6 @@ function attachCardImage(el: HTMLElement, code: string, alt: string): void {
     img.src = candidates[idx];
     idx += 1;
   };
-  el.classList.add("has-image");
   img.addEventListener("load", () => {
     el.classList.add("has-image");
     resolvedCardImageSrc.set(code, img.currentSrc || img.src);
@@ -179,6 +228,7 @@ function attachCardImage(el: HTMLElement, code: string, alt: string): void {
   });
   el.append(img);
   if (typeof resolved === "string") {
+    el.classList.add("has-image");
     img.src = resolved;
   } else {
     tryNext();
@@ -256,7 +306,7 @@ function downloadMatchLog(): void {
   setLog("Лог сохранен в файл.");
 }
 
-function renderLastMove(target: HTMLElement, playerId: string): void {
+function renderLastMove(target: HTMLElement, playerId: string, maxCards = 7): void {
   target.innerHTML = "";
   const last = lastActionByPlayer[playerId];
   if (!last || last.round !== game.roundNumber) {
@@ -276,18 +326,25 @@ function renderLastMove(target: HTMLElement, playerId: string): void {
 
   const cardsWrap = document.createElement("div");
   cardsWrap.className = "last-move-cards";
-  last.cards.slice(0, 7).forEach(card => {
+  last.cards.slice(0, maxCards).forEach(card => {
     const cardEl = renderFaceCard(card);
     cardEl.classList.add("mini");
     cardsWrap.append(cardEl);
   });
-  if (last.cards.length > 7) {
+  if (last.cards.length > maxCards) {
     const more = document.createElement("span");
     more.className = "last-move-more";
-    more.textContent = `+${last.cards.length - 7}`;
+    more.textContent = `+${last.cards.length - maxCards}`;
     cardsWrap.append(more);
   }
   target.append(cardsWrap);
+}
+
+function penaltyPill(penalty: number): HTMLElement {
+  const pill = document.createElement("span");
+  pill.className = `penalty-pill${penalty >= 40 ? " danger" : ""}`;
+  pill.textContent = `Очки: ${penalty}`;
+  return pill;
 }
 
 function comboText(displayed: DisplayedTablePlay): string {
@@ -327,23 +384,28 @@ function renderOpponents(): void {
     .forEach(player => {
       const wrap = document.createElement("div");
       wrap.className = `opp${turn === player ? " active" : ""}${tableOwner === player ? " on-table" : ""}${!active.has(player) ? " out" : ""}`;
+      wrap.dataset.playerId = player;
 
-      const title = document.createElement("div");
-      title.className = "opp-title";
-      title.textContent = playerLabel(player);
-
-      const meta = document.createElement("div");
-      meta.className = "opp-meta";
       const handCount = game.currentRound?.hands[player]?.length ?? 0;
       const penalty = game.standings[player]?.penalty ?? 0;
       const eliminated = game.standings[player]?.eliminated ?? false;
-      meta.textContent = `Набрано очков: ${penalty}${eliminated ? " | выбыл" : ""}`;
+
+      const title = document.createElement("div");
+      title.className = "opp-title";
+      const titleName = document.createElement("span");
+      titleName.textContent = playerLabel(player);
+      title.append(titleName);
       if (handCount === 1 && !eliminated) {
         const oneCard = document.createElement("span");
         oneCard.className = "one-card-badge show";
         oneCard.textContent = "Одна карта";
-        meta.append(" | ", oneCard);
+        title.append(oneCard);
       }
+
+      const meta = document.createElement("div");
+      meta.className = "opp-meta";
+      meta.append(penaltyPill(penalty));
+      if (eliminated) meta.append(" выбыл");
 
       const backs = document.createElement("div");
       backs.className = "opp-backs";
@@ -354,7 +416,7 @@ function renderOpponents(): void {
 
       const move = document.createElement("div");
       move.className = "last-move";
-      renderLastMove(move, player);
+      renderLastMove(move, player, 4);
 
       wrap.append(title, meta, backs, move);
       opponentsEl.append(wrap);
@@ -384,7 +446,9 @@ function renderCenter(): void {
 
   if (visiblePlay) {
     visiblePlay.combo.cards.forEach(card => {
-      centerCardsEl.append(renderFaceCard(card));
+      const cardEl = renderFaceCard(card);
+      cardEl.dataset.card = card;
+      centerCardsEl.append(cardEl);
     });
   } else {
     const empty = document.createElement("div");
@@ -474,9 +538,44 @@ function buildHandHints(hand: MuCard[]): string {
   return hints.length > 0 ? `Подсказка: ${hints.join(" | ")}` : "Подсказка: -";
 }
 
+type BeatOption = { cards: MuCard[]; combo: MuCombo };
+
+function beatOptions(hand: MuCard[], tableCombo: MuCombo): BeatOption[] {
+  const options: BeatOption[] = [];
+  generateBotCandidates(hand).forEach(cards => {
+    const result = canPlayMuCards(cards, tableCombo);
+    if (result.ok) options.push({ cards, combo: result.combo });
+  });
+  options.sort((a, b) => {
+    if (a.combo.isIntercept !== b.combo.isIntercept) return a.combo.isIntercept ? 1 : -1;
+    if (a.combo.topRankValue !== b.combo.topRankValue) return a.combo.topRankValue - b.combo.topRankValue;
+    return a.combo.length - b.combo.length;
+  });
+  return options;
+}
+
+function comboOptionLabel(combo: MuCombo): string {
+  const cardsText = combo.cards.map(card => `${rankText(card)}${suitSymbol(card)}`).join(" ");
+  if (combo.kind === "black_joker") return "чёрный джокер";
+  if (combo.kind === "red_joker") return "красный джокер";
+  if (combo.kind === "triple") return `тройник ${cardsText}`;
+  if (combo.kind === "quad") return `карэ ${cardsText}`;
+  if (combo.kind === "straight") return `стрит ${cardsText}`;
+  if (combo.kind === "double_pairs") return `пары ${cardsText}`;
+  return cardsText;
+}
+
+function handHintsText(hand: MuCard[], tableCombo: MuCombo | null, beatable: BeatOption[]): string {
+  if (!tableCombo) return buildHandHints(hand);
+  if (beatable.length === 0) return "Побить нечем — жмите «Пас»";
+  const shown = beatable.slice(0, 4).map(option => comboOptionLabel(option.combo));
+  const more = beatable.length > 4 ? " и ещё…" : "";
+  return `Можно побить: ${shown.join(" · ")}${more}`;
+}
+
 function renderHand(): void {
-  handEl.classList.remove("compact", "tiny", "wide3", "overlap");
   if (!game.currentRound) {
+    handEl.classList.remove("compact", "tiny", "wide3", "overlap");
     handEl.innerHTML = "";
     lastHandRenderKey = "";
     hintsEl.textContent = "Подсказка: -";
@@ -485,56 +584,67 @@ function renderHand(): void {
   const turn = currentPlayerId();
   const humanTurn = turn === HUMAN_ID;
   const hand = sortHandForHuman(game.currentRound.hands[HUMAN_ID] ?? []);
-  const players = game.playersOrder.length;
-  let cardWidth = players <= 3 ? 70 : players === 4 ? 66 : players <= 6 ? 62 : 58;
-  if (hand.length >= 16) cardWidth -= 6;
-  else if (hand.length >= 13) cardWidth -= 4;
-  else if (hand.length >= 10) cardWidth -= 2;
-  if (players >= 6 && hand.length >= 10) cardWidth -= 2;
-  if (players >= 5 && hand.length <= 9) cardWidth += 1;
-  cardWidth = Math.max(50, Math.min(74, cardWidth));
-  const cardHeight = Math.round(cardWidth * (88 / 60));
+  const tableCombo = game.currentRound.circle.lastPlay?.combo ?? null;
+  const beatable = tableCombo ? beatOptions(hand, tableCombo) : [];
+  const canBeatCards = new Set(beatable.flatMap(option => option.cards));
 
+  // Карты занимают всю доступную ширину без перекрытия; перекрытие
+  // включается только когда даже минимальный размер не помещается.
+  const HAND_GAP = 8;
+  const MAX_CARD_W = 88;
+  const MIN_CARD_W = 54;
+  const available = Math.max(
+    320,
+    (handEl.clientWidth || handEl.getBoundingClientRect().width || 960) - 4
+  );
+  const n = hand.length;
+  let cardWidth = MAX_CARD_W;
   let overlap = 0;
-  if (hand.length >= 16) overlap = 14;
-  else if (hand.length >= 13) overlap = 12;
-  else if (hand.length >= 10) overlap = 10;
-  else if (hand.length >= 8) overlap = 6;
-  else overlap = 4;
-  if (players >= 6) overlap += 2;
+  if (n > 0) {
+    const fitWidth = Math.floor((available - (n - 1) * HAND_GAP) / n);
+    if (fitWidth >= MIN_CARD_W) {
+      cardWidth = Math.min(MAX_CARD_W, fitWidth);
+    } else {
+      cardWidth = MIN_CARD_W;
+      overlap = Math.min(26, Math.ceil((n * MIN_CARD_W - available) / Math.max(1, n - 1)));
+    }
+  }
+  const cardHeight = Math.round(cardWidth * (88 / 60));
 
   const layoutKey = [
     hand.join(","),
-    players,
     cardWidth,
     overlap,
   ].join("|");
   if (layoutKey === lastHandRenderKey) {
-    hintsEl.textContent = buildHandHints(hand);
+    hintsEl.textContent = handHintsText(hand, tableCombo, beatable);
     const buttons = Array.from(handEl.querySelectorAll(".card-btn")) as HTMLButtonElement[];
     if (buttons.length === hand.length) {
       buttons.forEach((btn, idx) => {
         const card = hand[idx];
         btn.disabled = !humanTurn;
         btn.classList.toggle("sel", selectedCards.includes(card));
+        btn.classList.toggle("can-beat", canBeatCards.has(card));
       });
       return;
     }
   }
   lastHandRenderKey = layoutKey;
 
+  handEl.classList.remove("compact", "tiny", "wide3");
   handEl.innerHTML = "";
-  handEl.classList.add("overlap");
+  handEl.classList.toggle("overlap", overlap > 0);
   handEl.style.setProperty("--hand-card-w", `${cardWidth}px`);
   handEl.style.setProperty("--hand-card-h", `${cardHeight}px`);
   handEl.style.setProperty("--hand-overlap", `${overlap}px`);
+  handEl.style.setProperty("--hand-gap", overlap > 0 ? "0px" : `${HAND_GAP}px`);
 
-  hintsEl.textContent = buildHandHints(hand);
+  hintsEl.textContent = handHintsText(hand, tableCombo, beatable);
 
   hand.forEach(card => {
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = `card-btn${selectedCards.includes(card) ? " sel" : ""}`;
+    btn.className = `card-btn${selectedCards.includes(card) ? " sel" : ""}${canBeatCards.has(card) ? " can-beat" : ""}`;
     btn.disabled = !humanTurn;
     btn.dataset.card = card;
     btn.append(renderFaceCard(card));
@@ -553,17 +663,29 @@ function renderHand(): void {
   });
 }
 
+let handResizeTimer: number | null = null;
+window.addEventListener("resize", () => {
+  if (handResizeTimer !== null) window.clearTimeout(handResizeTimer);
+  handResizeTimer = window.setTimeout(() => {
+    handResizeTimer = null;
+    renderHand();
+  }, 120);
+});
+
 function renderButtons(): void {
   const turn = currentPlayerId();
   const humanTurn = !game.finished && turn === HUMAN_ID;
   const humanCards = game.currentRound?.hands[HUMAN_ID]?.length ?? 0;
+  const tableEmpty = !game.currentRound?.circle.lastPlay;
   playBtn.disabled = !humanTurn;
-  passBtn.disabled = !humanTurn;
+  passBtn.disabled = !humanTurn || tableEmpty;
   humanPanelEl.classList.toggle("is-active-turn", humanTurn);
   humanPanelEl.classList.toggle("is-waiting-turn", !humanTurn && !game.finished);
   const humanPenalty = game.standings[HUMAN_ID]?.penalty ?? 0;
   const eliminated = game.standings[HUMAN_ID]?.eliminated ?? false;
-  humanMetaEl.textContent = `Набрано очков: ${humanPenalty}${eliminated ? " | выбыл" : ""}`;
+  humanMetaEl.innerHTML = "";
+  humanMetaEl.append(penaltyPill(humanPenalty));
+  if (eliminated) humanMetaEl.append(" выбыл");
   renderLastMove(humanLastMoveEl, HUMAN_ID);
   if (humanTurn) {
     selectedEl.textContent =
@@ -588,18 +710,21 @@ function render(): void {
   renderHand();
   renderButtons();
   renderTableOwnerHighlight();
+  runMuFlights();
 }
 
 function dispatch(action: Parameters<typeof applyMuGameAction>[1]): boolean {
   const prevRound = game.roundNumber;
   const prevWinner = game.lastRoundWinner;
   const prevLastPlay = game.currentRound?.circle.lastPlay ?? null;
+  const flight = action.type === "play" ? captureMuFlight(action.playerId, action.cards) : null;
   const result = applyMuGameAction(game, action);
   if (!result.ok) {
     setLog(`Ошибка: ${result.error}`);
     return false;
   }
   game = result.state;
+  if (flight) pendingFlight = flight;
   const currentLastPlay = game.currentRound?.circle.lastPlay ?? null;
   if (game.roundNumber !== prevRound) {
     displayedTablePlay = null;
@@ -793,11 +918,15 @@ function pickBotMove(
   const candidates = generateBotCandidates(hand);
   const valid: Array<{ cards: MuCard[]; combo: MuCombo }> = [];
   candidates.forEach(cards => {
-    const validation = canPlayMuCards(cards, tableCombo as any);
+    const validation = canPlayMuCards(cards, tableCombo);
     if (!validation.ok) return;
     valid.push({ cards, combo: validation.combo });
   });
   if (valid.length === 0) return null;
+
+  // Если каким-то ходом можно выложить всю руку — раунд выигран, играем сразу.
+  const winning = valid.find(v => v.cards.length === hand.length);
+  if (winning) return winning.cards;
 
   const interceptCost = (combo: MuCombo): number => {
     if (combo.kind === "red_joker") return 4;

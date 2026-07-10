@@ -46,19 +46,15 @@ export function startDeal(options: StartGameOptions): GameState {
   } = options;
 
   const deck = shuffle(buildDeck(ruleset), rng);
-  const { hands } = dealHands(deck, playersInOrder, 8);
+  const cardsPerPlayer = Math.floor(deck.length / playersInOrder.length);
+  const { hands } = dealHands(deck, playersInOrder, cardsPerPlayer);
   const currentHolderOfJC = findHolderOfCard(hands, "JC") as PlayerId | null;
 
-  const computedTrumpSuit = computeTrumpSuit(
-    dealIndex,
-    prevHolderOfJC,
-    currentHolderOfJC,
-    playersInOrder,
-    ruleset
-  );
-  const trumpSuit = trumpSuitOverride ?? computedTrumpSuit;
+  const trumpSuit =
+    trumpSuitOverride ??
+    computeTrumpSuit(dealIndex, prevHolderOfJC, currentHolderOfJC, playersInOrder, ruleset);
 
-  const leader = playersInOrder[(playersInOrder.indexOf(dealer) + 1) % 4];
+  const leader = playersInOrder[(playersInOrder.indexOf(dealer) + 1) % playersInOrder.length];
 
   return {
     ruleset,

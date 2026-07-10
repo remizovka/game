@@ -73,9 +73,15 @@ function removeCardsFromHand(hand: DurakCard[], cards: DurakCard[]): DurakCard[]
   return next;
 }
 
-function maxCardsForRound(state: DurakGameState, defenderHandCount: number): number {
-  const firstRoundLimit = state.roundNumber === 1 && state.firstRoundMaxCards ? state.firstRoundMaxCards : 6;
-  return Math.min(6, defenderHandCount, firstRoundLimit);
+function maxCardsForRound(_state: DurakGameState, defenderHandCount: number): number {
+  return Math.min(6, defenderHandCount);
+}
+
+function initialAttackLimit(state: DurakGameState): number {
+  if (state.roundNumber === 1 && state.firstRoundMaxCards) {
+    return state.firstRoundMaxCards;
+  }
+  return 6;
 }
 
 function createEmptyTable(state: DurakGameState): DurakTableState {
@@ -177,6 +183,10 @@ function resolveSuccessfulDefense(state: DurakGameState): DurakGameState {
   clearTable(nextState);
   nextState.roundNumber += 1;
 
+  if (activeIndices(nextState).length <= 1) {
+    return markFinishedIfNeeded(nextState);
+  }
+
   const defenderStillActive = nextState.players[nextState.currentDefenderIndex]?.isActive;
   const nextAttacker = defenderStillActive
     ? nextState.currentDefenderIndex
@@ -193,8 +203,22 @@ function resolveTake(state: DurakGameState): DurakGameState {
   clearTable(nextState);
   nextState.roundNumber += 1;
 
+  if (activeIndices(nextState).length <= 1) {
+    return markFinishedIfNeeded(nextState);
+  }
+
   const nextAttacker = nextClockwiseActiveIndex(nextState, nextState.currentDefenderIndex);
   return markFinishedIfNeeded(setupRound(nextState, nextAttacker));
+}
+
+function canThrowInMore(state: DurakGameState, index: number): boolean {
+  const player = state.players[index];
+  if (!player || player.hand.length === 0) return false;
+  if (state.table.pairs.length === 0) return true;
+  if (state.table.pairs.length >= state.table.maxCards) return false;
+  if (state.table.pairs.length >= state.table.defenderCardLimit) return false;
+  const ranks = new Set(tableRanks(state.table.pairs));
+  return player.hand.some(card => ranks.has(durakCardRank(card)));
 }
 
 function eligibleThrowerIndices(state: DurakGameState): number[] {
@@ -207,7 +231,14 @@ function eligibleThrowerIndices(state: DurakGameState): number[] {
     }
   }
   const clockwise = clockwiseOrderFrom(state, attacker);
-  return clockwise.filter(index => out.includes(index) && index !== state.currentDefenderIndex);
+  // Ход дают только тем, кому реально есть что подкинуть: есть карта
+  // подходящего достоинства и на столе осталось место. Остальных пропускаем,
+  // не задавая лишний вопрос "пас?".
+  return clockwise.filter(index =>
+    out.includes(index) &&
+    index !== state.currentDefenderIndex &&
+    canThrowInMore(state, index),
+  );
 }
 
 function firstEligibleThrowerId(state: DurakGameState): string | null {
@@ -242,6 +273,9 @@ function validateAttackCards(state: DurakGameState, cards: DurakCard[]): string 
   if (cards.length === 0) return "Choose at least one card";
   if (state.table.pairs.length === 0 && !sameRank(cards)) {
     return "Initial attack must use cards of one rank";
+  }
+  if (state.table.pairs.length === 0 && cards.length > initialAttackLimit(state)) {
+    return "Too many cards for initial attack";
   }
   if (state.table.pairs.length + cards.length > state.table.maxCards) {
     return "Round card limit exceeded";
@@ -342,14 +376,17 @@ export function applyDurakAction(state: DurakGameState, action: DurakAction): Du
       });
     });
     ensureContributor(nextState, action.playerId);
-    nextState.table.passedThrowers = [];
+    // Пасы не сбрасываем: подкид не добавляет новых достоинств на стол,
+    // поэтому пасанувших повторно не спрашиваем. Новые достоинства появляются
+    // только после отбоя защитника — там пасы и сбрасываются.
 
     if (state.phase === "take") {
       nextState.phase = "take";
-      if (nextState.table.pairs.length >= nextState.table.maxCards) {
+      const nextThrower = firstEligibleThrowerId(nextState);
+      if (!nextThrower || nextState.table.pairs.length >= nextState.table.maxCards) {
         return { ok: true, state: resolveTake(nextState) };
       }
-      nextState.turnPlayerId = firstEligibleThrowerId(nextState);
+      nextState.turnPlayerId = nextThrower;
     } else {
       nextState.phase = "defense";
       nextState.turnPlayerId = nextState.players[nextState.currentDefenderIndex].id;
@@ -380,9 +417,13 @@ export function applyDurakAction(state: DurakGameState, action: DurakAction): Du
       if (defender.hand.length === 0) {
         return { ok: true, state: resolveSuccessfulDefense(nextState) };
       }
+      const nextThrower = firstEligibleThrowerId(nextState);
+      if (!nextThrower) {
+        return { ok: true, state: resolveSuccessfulDefense(nextState) };
+      }
       nextState.phase = "throw-in";
       nextState.table.passedThrowers = [];
-      nextState.turnPlayerId = firstEligibleThrowerId(nextState);
+      nextState.turnPlayerId = nextThrower;
     } else {
       nextState.turnPlayerId = action.playerId;
     }

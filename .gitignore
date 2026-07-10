@@ -5,6 +5,9 @@ web/dist/
 server/*.log
 server/data/
 
+belka-log-*.jsonl
+mu-log-*.jsonl
+
 .env
 .env.*
 

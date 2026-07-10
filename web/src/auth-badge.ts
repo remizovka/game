@@ -1,9 +1,11 @@
-﻿type AuthMe = {
+﻿import { resolveAuthApiBase } from "./auth-base";
+
+type AuthMe = {
   authenticated: boolean;
   user: null | { email: string; name: string | null };
 };
 
-const AUTH_API_BASE = "http://localhost:8787";
+const AUTH_API_BASE = resolveAuthApiBase();
 const BADGE_ID = "authStatusBadge";
 const ACCOUNT_URL = new URL("account.html", window.location.href).toString();
 type MountAuthBadgeOptions = {
@@ -120,6 +122,10 @@ function setBadge(state: "user" | "guest" | "error", text: string) {
 export async function mountAuthBadge(options: MountAuthBadgeOptions = {}) {
   ensureBadgeStyles();
   ensureBadge(options);
+  if (!AUTH_API_BASE) {
+    setBadge("error", "Авторизация недоступна");
+    return;
+  }
   try {
     const res = await fetch(`${AUTH_API_BASE}/api/auth/me`, { credentials: "include" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);

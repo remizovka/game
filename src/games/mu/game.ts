@@ -24,10 +24,14 @@ export interface MuGameResult {
   error?: string;
 }
 
-function nextDealerInActivePlayers(activePlayers: string[], dealerId: string): string {
-  const idx = activePlayers.indexOf(dealerId);
-  if (idx === -1) return activePlayers[0];
-  return activePlayers[(idx + 1) % activePlayers.length];
+function nextDealerAfter(playersOrder: string[], activePlayers: string[], dealerId: string): string {
+  const seat = playersOrder.indexOf(dealerId);
+  if (seat === -1) return activePlayers[0];
+  for (let step = 1; step <= playersOrder.length; step += 1) {
+    const candidate = playersOrder[(seat + step) % playersOrder.length];
+    if (activePlayers.includes(candidate)) return candidate;
+  }
+  return activePlayers[0];
 }
 
 function fail(state: MuGameState, error: string): MuGameResult {
@@ -63,7 +67,7 @@ function openNextRound(state: MuGameState, rng?: () => number): MuGameState {
   if (state.activePlayers.length <= 2) return state;
   if (!state.lastRoundWinner) return state;
 
-  const nextDealer = nextDealerInActivePlayers(state.activePlayers, state.dealerId);
+  const nextDealer = nextDealerAfter(state.playersOrder, state.activePlayers, state.dealerId);
   const nextRound = createMuRound({
     players: state.activePlayers,
     dealerId: nextDealer,

@@ -66,7 +66,8 @@ test("Durak game: first attacker holds the lowest trump", () => {
 
   assert.ok(expectedLowest);
   assert.equal(lowestTrumpByPlayer[game.currentAttackerIndex], expectedLowest);
-  assert.equal(game.players[game.currentDefenderIndex].id, "P1");
+  const expectedDefenderIndex = (game.currentAttackerIndex + 1) % game.players.length;
+  assert.equal(game.currentDefenderIndex, expectedDefenderIndex);
   assert.equal(game.turnPlayerId, game.players[game.currentAttackerIndex].id);
 });
 
@@ -121,6 +122,45 @@ test("Durak game: successful defense discards table and makes defender the next 
   assert.equal(game.turnPlayerId, "P1");
 });
 
+test("Durak game: draw when both players run out on a successful final defense", () => {
+  let game: DurakGameState = {
+    ...baseState(),
+    players: [
+      { id: "P0", hand: ["6C"], isActive: true },
+      { id: "P1", hand: ["7C"], isActive: true },
+    ],
+    table: {
+      pairs: [],
+      contributors: [],
+      passedThrowers: [],
+      maxCards: 1,
+      defenderCardLimit: 1,
+    },
+    roundNumber: 5,
+  };
+
+  const attack = applyDurakAction(game, {
+    type: "attack",
+    playerId: "P0",
+    cards: ["6C"],
+  });
+  assert.equal(attack.ok, true);
+  game = attack.state;
+
+  const defend = applyDurakAction(game, {
+    type: "defend",
+    playerId: "P1",
+    attackIndex: 0,
+    card: "7C",
+  });
+  assert.equal(defend.ok, true);
+  game = defend.state;
+
+  assert.equal(game.finished, true);
+  assert.equal(game.loserId, null);
+  assert.equal(game.turnPlayerId, null);
+});
+
 test("Durak game: defender can take and skips the next attack", () => {
   let game = baseState();
 
@@ -148,19 +188,53 @@ test("Durak game: defender can take and skips the next attack", () => {
   });
   assert.equal(throwIn.ok, true);
   game = throwIn.state;
-  assert.equal(game.phase, "take");
 
-  const pass0 = applyDurakAction(game, { type: "pass", playerId: "P0" });
-  assert.equal(pass0.ok, true);
-  game = pass0.state;
-
-  const pass1 = applyDurakAction(game, { type: "pass", playerId: "P2" });
-  assert.equal(pass1.ok, true);
-  game = pass1.state;
-
+  // Подкинуть больше некому (подходящих карт ни у кого нет) —
+  // раунд завершается сразу, без лишних вопросов "пас?".
   assert.equal(game.phase, "attack");
   assert.equal(game.roundNumber, 2);
   assert.deepEqual(game.players.find(player => player.id === "P1")?.hand.sort(), ["6C", "6D", "7D", "8C", "AD"].sort());
   assert.equal(game.players[game.currentAttackerIndex].id, "P2");
   assert.equal(game.players[game.currentDefenderIndex].id, "P0");
+});
+
+test("Durak game: throwers without matching ranks are skipped automatically", () => {
+  let game: DurakGameState = {
+    ...baseState(),
+    players: [
+      { id: "P0", hand: ["6C", "6D", "AH"], isActive: true },
+      { id: "P1", hand: ["7D", "8C", "AD"], isActive: true },
+      { id: "P2", hand: ["9D", "AS", "AC"], isActive: true },
+    ],
+  };
+
+  const attack = applyDurakAction(game, {
+    type: "attack",
+    playerId: "P0",
+    cards: ["6C"],
+  });
+  assert.equal(attack.ok, true);
+  game = attack.state;
+
+  const defend = applyDurakAction(game, {
+    type: "defend",
+    playerId: "P1",
+    attackIndex: 0,
+    card: "8C",
+  });
+  assert.equal(defend.ok, true);
+  game = defend.state;
+  assert.equal(game.phase, "throw-in");
+  assert.equal(game.turnPlayerId, "P0");
+
+  const pass0 = applyDurakAction(game, { type: "pass", playerId: "P0" });
+  assert.equal(pass0.ok, true);
+  game = pass0.state;
+
+  // У P2 нет карт достоинств со стола — его не спрашивают, защита закрыта.
+  assert.equal(game.phase, "attack");
+  assert.equal(game.roundNumber, 2);
+  assert.equal(game.players[game.currentAttackerIndex].id, "P1");
+  assert.equal(game.players[game.currentDefenderIndex].id, "P2");
+  assert.equal(game.discardPile.sort().join(","), ["6C", "8C"].sort().join(","));
 });

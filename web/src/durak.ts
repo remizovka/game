@@ -5,11 +5,19 @@
   durakCardRank,
   durakCardSuit,
   tableRanks,
+  type DurakAction,
   type DurakCard,
   type DurakGameState,
-  type DurakTablePair,
 } from "@engine/index";
 import { mountAuthBadge } from "./auth-badge";
+import {
+  centeredIn,
+  flightsEnabled,
+  flyGhost,
+  flyGhostToElement,
+  rectOf,
+  type FlightRect,
+} from "./card-flight";
 
 mountAuthBadge({ mode: "inline", beforeSelector: "#newGameBtn", containerSelector: ".setup" });
 
@@ -38,6 +46,7 @@ let game = createGame(4);
 let selectedCards: DurakCard[] = [];
 let selectedAttackIndex: number | null = null;
 let botTimer: number | null = null;
+let botScheduling = false;
 let lastLogLine = "";
 const resolvedCardImageSrc = new Map<string, string | null>();
 
@@ -58,12 +67,16 @@ function playerLabel(playerId: string): string {
   return `Игрок ${idx}`;
 }
 
+function playerLabelDative(playerId: string): string {
+  if (playerId === HUMAN_ID) return "вам";
+  const idx = Number(playerId.slice(1)) + 1;
+  return `Игроку ${idx}`;
+}
+
 function seatLayout(count: number): string[] {
   if (count <= 1) return ["seat-top"];
   if (count === 2) return ["seat-left", "seat-right"];
-  if (count === 3) return ["seat-left", "seat-top", "seat-right"];
-  if (count === 4) return ["seat-left", "seat-top-left", "seat-top-right", "seat-right"];
-  return ["seat-left", "seat-top-left", "seat-top", "seat-top-right", "seat-right"];
+  return ["seat-left", "seat-top", "seat-right"];
 }
 
 function currentPlayerId(): string | null {
@@ -88,35 +101,6 @@ function humanTurn(): boolean {
 
 function humanIsDefender(): boolean {
   return currentDefenderId() === HUMAN_ID;
-}
-
-function activePlayerIds(): string[] {
-  return game.players.filter(player => player.isActive).map(player => player.id);
-}
-
-function nextClockwisePlayerId(playerId: string): string | null {
-  const active = activePlayerIds();
-  const index = active.indexOf(playerId);
-  if (index === -1 || active.length === 0) return null;
-  return active[(index + 1) % active.length] ?? null;
-}
-
-function eligibleThrowerIds(): string[] {
-  const attackerId = currentAttackerId();
-  const defenderId = currentDefenderId();
-  if (!attackerId || !defenderId) return [];
-  const out = [attackerId];
-  if (activePlayerIds().length >= 3) {
-    const otherNeighbor = nextClockwisePlayerId(defenderId);
-    if (otherNeighbor && otherNeighbor !== defenderId && !out.includes(otherNeighbor)) {
-      out.push(otherNeighbor);
-    }
-  }
-  const active = activePlayerIds();
-  const attackerIndex = active.indexOf(attackerId);
-  if (attackerIndex === -1) return out;
-  const clockwise = [...active.slice(attackerIndex), ...active.slice(0, attackerIndex)];
-  return clockwise.filter(playerId => out.includes(playerId) && playerId !== defenderId);
 }
 
 function unresolvedAttackIndices(): number[] {
@@ -151,13 +135,6 @@ function rankText(card: DurakCard): string {
 
 function isRed(card: DurakCard): boolean {
   return card.endsWith("H") || card.endsWith("D");
-}
-
-function suitNameRu(suit: string): string {
-  if (suit === "C") return "крести";
-  if (suit === "S") return "пики";
-  if (suit === "H") return "черви";
-  return "бубны";
 }
 
 function rankValue(card: DurakCard): number {
@@ -207,18 +184,10 @@ function verboseCardAssetName(code: string): string | null {
 
 function cardAssetCandidates(code: string): string[] {
   const verbose = verboseCardAssetName(code);
-  const roots = [
-    new URL("cards", PAGE_BASE_URL).toString().replace(/\/$/, ""),
-    new URL("assets/cards", PAGE_BASE_URL).toString().replace(/\/$/, ""),
-  ];
-  const names = [code, ...(verbose ? [verbose] : [])];
-  const bases = roots.flatMap(root => names.map(name => `${root}/${name}`));
+  if (!verbose) return [];
+  const root = new URL("cards", PAGE_BASE_URL).toString().replace(/\/$/, "");
   const version = "cards-v2";
-  return [
-    ...bases.map(base => `${base}.svg?v=${version}`),
-    ...bases.map(base => `${base}.png?v=${version}`),
-    ...bases.map(base => `${base}.webp?v=${version}`),
-  ];
+  return [`${root}/${verbose}.svg?v=${version}`, `${root}/${verbose}.png?v=${version}`];
 }
 
 function attachCardImage(el: HTMLElement, code: string, alt: string): void {
@@ -237,7 +206,6 @@ function attachCardImage(el: HTMLElement, code: string, alt: string): void {
     img.src = candidates[idx];
     idx += 1;
   };
-  el.classList.add("has-image");
   img.addEventListener("load", () => {
     el.classList.add("has-image");
     resolvedCardImageSrc.set(code, img.currentSrc || img.src);
@@ -253,6 +221,7 @@ function attachCardImage(el: HTMLElement, code: string, alt: string): void {
   });
   el.append(img);
   if (typeof resolved === "string") {
+    el.classList.add("has-image");
     img.src = resolved;
   } else {
     tryNext();
@@ -282,6 +251,147 @@ function renderBackCard(): HTMLElement {
   attachCardImage(el, "BACK", "Рубашка карты");
   return el;
 }
+
+// --- Анимация полёта карт -------------------------------------------------
+
+type FlightContext = {
+  action: DurakAction;
+  prevRound: number;
+  prevPairsCount: number;
+  prevDiscardCount: number;
+  prevDefenderId: string | null;
+  cardRects: Map<DurakCard, FlightRect>;
+  tableCards: { card: DurakCard; rect: FlightRect }[];
+  sourceRect: FlightRect | null;
+};
+
+let pendingFlight: FlightContext | null = null;
+
+function captureFlightContext(action: DurakAction): FlightContext {
+  const cardRects = new Map<DurakCard, FlightRect>();
+  if (action.playerId === HUMAN_ID && (action.type === "attack" || action.type === "defend")) {
+    handEl.querySelectorAll<HTMLElement>(".card-btn").forEach(btn => {
+      const code = btn.dataset.card as DurakCard | undefined;
+      if (code) cardRects.set(code, rectOf(btn));
+    });
+  }
+
+  const tableCards: { card: DurakCard; rect: FlightRect }[] = [];
+  centerCardsEl.querySelectorAll<HTMLElement>(".table-pair .card").forEach(el => {
+    const code = el.dataset.card as DurakCard | undefined;
+    if (code) tableCards.push({ card: code, rect: rectOf(el) });
+  });
+
+  let sourceRect: FlightRect | null = null;
+  if (action.playerId === HUMAN_ID) {
+    sourceRect = rectOf(handEl);
+  } else {
+    const opp = opponentsEl.querySelector<HTMLElement>(`[data-player-id="${action.playerId}"]`);
+    if (opp) sourceRect = rectOf(opp);
+  }
+
+  return {
+    action,
+    prevRound: game.roundNumber,
+    prevPairsCount: game.table.pairs.length,
+    prevDiscardCount: game.discardPile.length,
+    prevDefenderId: currentDefenderId(),
+    cardRects,
+    tableCards,
+    sourceRect,
+  };
+}
+
+function runFlights(): void {
+  const ctx = pendingFlight;
+  pendingFlight = null;
+  if (!ctx || !flightsEnabled()) return;
+
+  const roundEnded =
+    game.roundNumber !== ctx.prevRound ||
+    (game.finished && game.table.pairs.length === 0 && ctx.tableCards.length > 0);
+
+  if (roundEnded) {
+    // Собираем всё, что было на столе, плюс карты самого действия.
+    const swept: { card: DurakCard; rect: FlightRect }[] = [...ctx.tableCards];
+    if (ctx.action.type === "attack") {
+      ctx.action.cards.forEach(card => {
+        const rect = ctx.cardRects.get(card) ?? ctx.sourceRect;
+        if (rect) swept.push({ card, rect });
+      });
+    } else if (ctx.action.type === "defend") {
+      const rect = ctx.cardRects.get(ctx.action.card) ?? ctx.sourceRect;
+      if (rect) swept.push({ card: ctx.action.card, rect });
+    }
+    if (swept.length === 0) return;
+
+    const defenderTook = game.discardPile.length === ctx.prevDiscardCount;
+    if (defenderTook && ctx.prevDefenderId) {
+      // Карты уходят в руку взявшего.
+      const takerIsHuman = ctx.prevDefenderId === HUMAN_ID;
+      const destZone = takerIsHuman
+        ? rectOf(handEl)
+        : (() => {
+            const opp = opponentsEl.querySelector<HTMLElement>(
+              `[data-player-id="${ctx.prevDefenderId}"]`
+            );
+            return opp ? rectOf(opp) : null;
+          })();
+      if (!destZone) return;
+      swept.forEach((item, index) => {
+        let onDone: (() => void) | undefined;
+        if (takerIsHuman) {
+          const btn = handEl.querySelector<HTMLElement>(`.card-btn[data-card="${item.card}"]`);
+          if (btn) {
+            btn.style.visibility = "hidden";
+            onDone = () => {
+              btn.style.visibility = "";
+            };
+          }
+        }
+        flyGhost({
+          ghost: renderFaceCard(item.card),
+          from: item.rect,
+          to: centeredIn(destZone, item.rect),
+          delay: index * 50,
+          fade: !takerIsHuman,
+          onDone,
+        });
+      });
+    } else {
+      // Бито: карты улетают к колоде/козырю и растворяются.
+      const destZone = rectOf(trumpInfoEl);
+      swept.forEach((item, index) => {
+        flyGhost({
+          ghost: renderFaceCard(item.card),
+          from: item.rect,
+          to: centeredIn(destZone, item.rect),
+          delay: index * 50,
+          fade: true,
+        });
+      });
+    }
+    return;
+  }
+
+  // Раунд продолжается: атака/подкид или отбой летят на свои места на столе.
+  const pairEls = centerCardsEl.querySelectorAll<HTMLElement>(".table-pair");
+  if (ctx.action.type === "attack") {
+    ctx.action.cards.forEach((card, index) => {
+      const pairEl = pairEls[ctx.prevPairsCount + index];
+      const destEl = pairEl?.querySelector<HTMLElement>(".attack-card");
+      const from = ctx.cardRects.get(card) ?? ctx.sourceRect;
+      if (destEl && from) flyGhostToElement(renderFaceCard(card), from, destEl, index * 70);
+    });
+  } else if (ctx.action.type === "defend") {
+    const pairEl = pairEls[ctx.action.attackIndex];
+    const destEl = pairEl?.querySelector<HTMLElement>(".defense-card");
+    const from = ctx.cardRects.get(ctx.action.card) ?? ctx.sourceRect;
+    if (destEl && from) flyGhostToElement(renderFaceCard(ctx.action.card), from, destEl, 0);
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 function setLog(message: string): void {
   if (message === lastLogLine) return;
@@ -320,9 +430,21 @@ function sanitizeSelection(): void {
 function roleText(playerId: string): string {
   const player = playerById(playerId);
   if (!player?.isActive) return "вне игры";
-  if (playerId === currentDefenderId()) return "защищается";
+  const defender = currentDefenderId();
+  const target = defender ? playerLabelDative(defender) : "";
+  if (playerId === defender) {
+    return game.phase === "take" ? "берёт карты" : "защищается";
+  }
   if (playerId === currentAttackerId()) {
-    return game.phase === "throw-in" || game.phase === "take" ? "подкидывает" : "атакует";
+    return game.phase === "throw-in" || game.phase === "take"
+      ? `подкидывает ${target}`
+      : `ходит под ${target}`;
+  }
+  if (
+    playerId === currentPlayerId() &&
+    (game.phase === "throw-in" || game.phase === "take")
+  ) {
+    return `подкидывает ${target}`;
   }
   return "ждёт";
 }
@@ -355,31 +477,43 @@ function humanPrompt(): string {
       : "Партия закончилась.";
   }
 
+  const defender = currentDefenderId();
+  const defenderDat = defender ? playerLabelDative(defender) : "";
+
   if (!humanTurn()) {
     const turn = currentPlayerId();
     if (!turn) return "Ожидание следующего хода.";
-    if (game.phase === "defense") return `${playerLabel(turn)} кроется.`;
-    if (game.phase === "attack") return `${playerLabel(turn)} ходит.`;
-    return `${playerLabel(turn)} решает, подкидывать ли ещё.`;
+    if (game.phase === "defense") {
+      return defender === HUMAN_ID
+        ? "Сейчас ваша защита."
+        : `${playerLabel(turn)} кроется.`;
+    }
+    if (game.phase === "attack") return `${playerLabel(turn)} ходит под ${defenderDat}.`;
+    if (game.phase === "take") {
+      return `${playerLabel(turn)} решает, докинуть ли ${defenderDat}.`;
+    }
+    return `${playerLabel(turn)} решает, подкинуть ли ${defenderDat}.`;
   }
 
   if (humanIsDefender() && game.phase === "defense") {
-    if (selectedCards.length === 0) return "Вам крыться.";
+    if (selectedCards.length === 0) {
+      return "Вам крыться: выберите карту в руке — или нажмите «Беру».";
+    }
     return resolveDefenseTarget(selectedCards[0]) === null
       ? "Выберите карту на столе, которую хотите побить."
       : "Карта подходит. Можно крыть.";
   }
 
   if (game.phase === "attack" && game.table.pairs.length === 0) {
-    return "Ходите любой картой.";
+    return `Ваш ход: атакуйте ${defenderDat} любой картой (несколько — только одного достоинства).`;
   }
 
-  if (game.phase === "throw-in" || game.phase === "take") {
-    return selectedCards.length > 0
-      ? "Подкидывайте карты того же достоинства, что и карты на столе."
-      : game.phase === "take"
-        ? "Соперник берёт. Докладывать будем?"
-        : "Подкидывайте карты того же достоинства, что и карты на столе.";
+  if (game.phase === "take") {
+    return `${defender ? playerLabel(defender) : "Соперник"} берёт. Можно докинуть карты тех же достоинств — или «Пусть берёт».`;
+  }
+
+  if (game.phase === "throw-in") {
+    return `Можно подкинуть ${defenderDat} карты тех же достоинств, что на столе, — или нажмите «Бито».`;
   }
 
   return selectedCards.length > 0 ? `Выбрано карт: ${selectedCards.length}.` : "Ваш ход.";
@@ -395,6 +529,7 @@ function renderOpponents(): void {
       const wrap = document.createElement("div");
       const seat = seats[index] ?? "seat-top";
       wrap.className = `opp ${seat}${turn === player.id ? " active" : ""}${player.id === currentAttackerId() ? " attacker" : ""}${player.id === currentDefenderId() ? " defender" : ""}${!player.isActive ? " out" : ""}`;
+      wrap.dataset.playerId = player.id;
 
       const speech = playerSpeech(player.id);
       if (speech) {
@@ -423,7 +558,7 @@ function renderOpponents(): void {
 
       const meta = document.createElement("div");
       meta.className = "opp-meta";
-      meta.textContent = "";
+      meta.textContent = player.isActive ? `Карт: ${player.hand.length}` : "";
 
       const backs = document.createElement("div");
       backs.className = "opp-backs";
@@ -437,58 +572,7 @@ function renderOpponents(): void {
   });
 }
 
-function pairLabel(pair: DurakTablePair): string {
-  return `подкинул ${playerLabel(pair.throwerId)}`;
-}
-
 function renderCenter(): void {
-  const deckCount = game.deck.length;
-  trumpInfoEl.innerHTML = "";
-  const cluster = document.createElement("div");
-  cluster.className = "deck-cluster";
-
-  const trumpCluster = document.createElement("div");
-  trumpCluster.className = "stack-cluster trump";
-  const trumpPile = document.createElement("div");
-  trumpPile.className = "stack-pile";
-  if (deckCount > 0) {
-    for (let i = 1; i <= 2; i += 1) {
-      const back = renderBackCard();
-      back.classList.add(`stack-back-${i}`);
-      trumpPile.append(back);
-    }
-  }
-  const trumpCardEl = renderFaceCard(game.trumpCard, true);
-  if (deckCount > 0) {
-    trumpCardEl.classList.add("stack-trump-card");
-  } else {
-    trumpCardEl.classList.add("stack-single-card");
-  }
-  trumpPile.append(trumpCardEl);
-  trumpCluster.append(trumpPile);
-
-  cluster.append(trumpCluster);
-  if (deckCount > 0) {
-    const deckCluster = document.createElement("div");
-    deckCluster.className = "stack-cluster deck";
-    const deckPile = document.createElement("div");
-    deckPile.className = "stack-pile";
-    const visibleBacks = Math.max(2, Math.min(4, Math.ceil(deckCount / 6)));
-    for (let i = 1; i <= visibleBacks; i += 1) {
-      const back = renderBackCard();
-      back.classList.add(`stack-back-${i}`);
-      deckPile.append(back);
-    }
-    const deckFront = renderBackCard();
-    deckPile.append(deckFront);
-    const deckCountEl = document.createElement("div");
-    deckCountEl.className = "stack-count";
-    deckCountEl.textContent = String(deckCount);
-    deckCluster.append(deckPile, deckCountEl);
-    cluster.append(deckCluster);
-  }
-  trumpInfoEl.append(cluster);
-
   if (game.finished) {
     winnerBannerEl.innerHTML = "";
     const title = document.createElement("div");
@@ -542,11 +626,13 @@ function renderCenter(): void {
 
     const attack = renderFaceCard(pair.attack);
     attack.classList.add("attack-card");
+    attack.dataset.card = pair.attack;
     wrap.append(attack);
 
     if (pair.defense) {
       const defense = renderFaceCard(pair.defense);
       defense.classList.add("defense-card");
+      defense.dataset.card = pair.defense;
       wrap.append(defense);
     }
 
@@ -572,6 +658,7 @@ function renderHand(): void {
     btn.type = "button";
     btn.className = `card-btn${selectedCards.includes(card) ? " sel" : ""}`;
     btn.disabled = !canClick;
+    btn.dataset.card = card;
     btn.append(renderFaceCard(card));
     btn.addEventListener("click", () => {
       if (!humanTurn()) return;
@@ -603,10 +690,59 @@ function selectionText(): string {
   return `Выбрано: ${cardsText}`;
 }
 
+function renderTrumpInfo(): void {
+  const deckCount = game.deck.length;
+  trumpInfoEl.innerHTML = "";
+
+  const cluster = document.createElement("div");
+  cluster.className = "deck-cluster";
+
+  const trumpCluster = document.createElement("div");
+  trumpCluster.className = "stack-cluster trump";
+  const trumpPile = document.createElement("div");
+  trumpPile.className = "stack-pile";
+
+  if (deckCount > 0) {
+    const trumpCardEl = renderFaceCard(game.trumpCard, true);
+    trumpCardEl.classList.add("stack-trump-card");
+    trumpPile.append(trumpCardEl);
+  } else {
+    const trumpSuitEl = document.createElement("div");
+    trumpSuitEl.className = "trump-suit-only";
+    trumpSuitEl.textContent = suitSymbol(game.trumpCard);
+    trumpPile.append(trumpSuitEl);
+  }
+  trumpCluster.append(trumpPile);
+  cluster.append(trumpCluster);
+
+  if (deckCount > 0) {
+    const deckCluster = document.createElement("div");
+    deckCluster.className = "stack-cluster deck";
+    const deckPile = document.createElement("div");
+    deckPile.className = "stack-pile";
+    const visibleBacks = Math.max(2, Math.min(4, Math.ceil(deckCount / 6)));
+    for (let i = 1; i <= visibleBacks; i += 1) {
+      const back = renderBackCard();
+      back.classList.add(`stack-back-${i}`);
+      deckPile.append(back);
+    }
+    const deckFront = renderBackCard();
+    deckPile.append(deckFront);
+    const deckCountEl = document.createElement("div");
+    deckCountEl.className = "stack-count";
+    deckCountEl.textContent = String(deckCount);
+    deckCluster.append(deckPile, deckCountEl);
+    cluster.append(deckCluster);
+  }
+
+  trumpInfoEl.append(cluster);
+}
+
 function renderHumanMeta(): void {
   humanPanelEl.className = `player${currentAttackerId() === HUMAN_ID ? " attacker" : ""}${currentDefenderId() === HUMAN_ID ? " defender" : ""}`;
-  humanMetaEl.textContent = "";
+  humanMetaEl.textContent = roleText(HUMAN_ID);
   statusLineEl.textContent = humanPrompt();
+  statusLineEl.classList.toggle("your-turn", humanTurn() && !game.finished);
   selectedInfoEl.textContent = selectionText();
 }
 
@@ -634,7 +770,7 @@ function renderButtons(): void {
     game.phase === "throw-in" || game.phase === "take" ? "Подкинуть" : "Хожу";
   defendBtn.textContent = "Крыть";
   takeBtn.textContent = "Беру";
-  passBtn.textContent = game.phase === "take" ? "Пусть берёт" : "Пас";
+  passBtn.textContent = game.phase === "take" ? "Пусть берёт" : "Бито";
 
   attackBtn.disabled = !throwing || !canHumanAttackSelection();
   defendBtn.disabled = !defending || selectedCards.length !== 1 || resolveDefenseTarget(selectedCards[0]) === null;
@@ -656,19 +792,31 @@ function render(): void {
   renderCenter();
   renderHand();
   renderHumanMeta();
+  renderTrumpInfo();
   renderButtons();
+  runFlights();
   if (!game.finished && currentPlayerId() && currentPlayerId() !== HUMAN_ID) {
-    scheduleBots();
+    // Deferred to break potential recursion from bot turns
+    queueMicrotask(() => scheduleBots());
   }
 }
 
-function dispatch(action: Parameters<typeof applyDurakAction>[1]): boolean {
+function dispatch(action: DurakAction): boolean {
+  const flightContext = captureFlightContext(action);
   const result = applyDurakAction(game, action);
   if (!result.ok) {
     setLog(`Ошибка: ${result.error}`);
     return false;
   }
   game = result.state;
+  const flightWorthy =
+    flightContext.action.type === "attack" ||
+    flightContext.action.type === "defend" ||
+    game.roundNumber !== flightContext.prevRound ||
+    game.finished;
+  if (flightWorthy) {
+    pendingFlight = flightContext;
+  }
   clearLog();
   sanitizeSelection();
   return true;
@@ -678,7 +826,7 @@ function autoResolvePendingRound(): void {
   let safety = 0;
   while (safety < 8 && ["throw-in", "take"].includes(game.phase)) {
     const turn = currentPlayerId();
-    if (!turn) return;
+    if (!turn || turn === HUMAN_ID) return;
     if (canPlayerThrowCards(turn)) return;
     const advanced = dispatch({ type: "pass", playerId: turn });
     if (!advanced) return;
@@ -772,55 +920,52 @@ function performBotTurn(playerId: string): boolean {
       ? dispatch({ type: "attack", playerId, cards })
       : dispatch({ type: "pass", playerId });
   }
-  render();
   return ok;
 }
 
-function flushHiddenBotTurns(): void {
-  let safety = 0;
-  while (safety < 12) {
+function scheduleBots(): void {
+  if (botScheduling) return;
+  botScheduling = true;
+
+  try {
+    if (botTimer !== null) {
+      window.clearTimeout(botTimer);
+      botTimer = null;
+    }
+
     autoResolvePendingRound();
     if (game.finished) return;
-    const playerId = currentPlayerId();
-    if (!playerId || playerId === HUMAN_ID) return;
-    if (!["throw-in", "take"].includes(game.phase)) return;
-    const ok = performBotTurn(playerId);
-    if (!ok) return;
-    safety += 1;
+    const turn = currentPlayerId();
+    if (!turn || turn === HUMAN_ID) return;
+
+    botTimer = window.setTimeout(() => {
+      botTimer = null;
+      if (game.finished) return;
+      const playerId = currentPlayerId();
+      if (!playerId || playerId === HUMAN_ID) return;
+
+      const ok = performBotTurn(playerId);
+      if (!ok) {
+        // If bot action failed (e.g. during throw-in with no valid cards),
+        // force a pass to prevent softlock
+        if (["throw-in", "take"].includes(game.phase)) {
+          dispatch({ type: "pass", playerId });
+        }
+      }
+      autoResolvePendingRound();
+      render();
+    }, BOT_DELAY_MS);
+  } finally {
+    botScheduling = false;
   }
 }
 
-function scheduleBots(): void {
+function startNewGameFromUI(): void {
   if (botTimer !== null) {
     window.clearTimeout(botTimer);
     botTimer = null;
   }
-
-  flushHiddenBotTurns();
-  autoResolvePendingRound();
-  if (game.finished) return;
-  const turn = currentPlayerId();
-  if (!turn || turn === HUMAN_ID) return;
-
-  if (["throw-in", "take"].includes(game.phase)) {
-    flushHiddenBotTurns();
-    return;
-  }
-
-  botTimer = window.setTimeout(() => {
-    botTimer = null;
-    if (game.finished) return;
-    const playerId = currentPlayerId();
-    if (!playerId || playerId === HUMAN_ID) return;
-
-    const ok = performBotTurn(playerId);
-    if (ok) {
-      scheduleBots();
-    }
-  }, BOT_DELAY_MS);
-}
-
-function startNewGameFromUI(): void {
+  botScheduling = false;
   const count = Number(playerCountEl.value);
   game = createGame(count);
   selectedCards = [];
